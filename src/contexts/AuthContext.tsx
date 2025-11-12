@@ -45,6 +45,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Helper function to get user data from Firestore
 async function getUserDataFromFirestore(uid: string): Promise<{ role: UserRole; status: UserStatus; permissions?: any }> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     const userDoc = await getDoc(doc(db, 'users', uid));
     if (userDoc.exists()) {
@@ -80,6 +83,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!auth) {
+      setIsLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
@@ -99,6 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
+    if (!auth) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       await signInWithEmailAndPassword(auth, email, password);
       // User state will be updated by onAuthStateChanged
@@ -108,6 +119,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signup = async (email: string, password: string, firstName: string, lastName: string, employeeId: string) => {
+    if (!auth || !db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
@@ -136,6 +150,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    if (!auth) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       await firebaseSignOut(auth);
       // User state will be updated by onAuthStateChanged
@@ -145,6 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
+    if (!auth || !db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
@@ -167,6 +187,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGithub = async () => {
+    if (!auth || !db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const provider = new GithubAuthProvider();
       const result = await signInWithPopup(auth, provider);
@@ -189,6 +212,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const approveUser = async (userId: string, role: UserRole) => {
+    if (!auth || !db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const currentUser = auth.currentUser;
       await updateDoc(doc(db, 'users', userId), {
@@ -209,6 +235,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const rejectUser = async (userId: string) => {
+    if (!db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       await updateDoc(doc(db, 'users', userId), {
         status: 'rejected',
@@ -220,6 +249,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const getPendingUsers = async () => {
+    if (!db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const q = query(collection(db, 'users'), where('status', '==', 'pending'));
       const querySnapshot = await getDocs(q);
@@ -233,6 +265,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const getAllUsers = async () => {
+    if (!db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const querySnapshot = await getDocs(collection(db, 'users'));
       return querySnapshot.docs.map(doc => ({

@@ -37,6 +37,9 @@ export async function createTask(taskData: {
   createdBy: string;
   createdByName: string;
 }): Promise<string> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     const docRef = await addDoc(collection(db, 'tasks'), {
       taskId: taskData.taskId,
@@ -64,6 +67,9 @@ export async function createTask(taskData: {
  * Update task status
  */
 export async function updateTaskStatus(taskId: string, status: TaskStatus): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     await updateDoc(doc(db, 'tasks', taskId), {
       status,
@@ -79,6 +85,9 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus): Prom
  * Update task images
  */
 export async function updateTaskImages(taskId: string, images: string[]): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     await updateDoc(doc(db, 'tasks', taskId), {
       images,
@@ -105,6 +114,9 @@ export async function updateTask(
     images: string[];
   }
 ): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     await updateDoc(doc(db, 'tasks', taskId), {
       taskId: taskData.taskId,
@@ -126,6 +138,9 @@ export async function updateTask(
  * Get all tasks (for admins)
  */
 export async function getAllTasks(): Promise<Task[]> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     const q = query(collection(db, 'tasks'), orderBy('createdAt', 'desc'));
     const querySnapshot = await getDocs(q);
@@ -143,6 +158,9 @@ export async function getAllTasks(): Promise<Task[]> {
  * Get tasks assigned to a specific user
  */
 export async function getTasksByUser(userId: string): Promise<Task[]> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     // Note: Firestore doesn't support orderBy with array-contains without a composite index
     // We'll fetch all tasks and sort in memory, or create a composite index
@@ -168,6 +186,9 @@ export async function getTasksByUser(userId: string): Promise<Task[]> {
  * Get tasks by status
  */
 export async function getTasksByStatus(status: TaskStatus): Promise<Task[]> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     const q = query(
       collection(db, 'tasks'),
@@ -198,6 +219,9 @@ export async function getTasksByStatus(status: TaskStatus): Promise<Task[]> {
  * Delete a task
  */
 export async function deleteTask(taskId: string): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
   try {
     await deleteDoc(doc(db, 'tasks', taskId));
   } catch (error) {

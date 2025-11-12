@@ -27,6 +27,9 @@ const Setup = () => {
   const router = useRouter();
 
   const checkIfAdminExists = async () => {
+    if (!db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
     try {
       const q = query(collection(db, 'users'), where('role', '==', 'admin'), where('status', '==', 'approved'));
       const querySnapshot = await getDocs(q);
@@ -55,6 +58,10 @@ const Setup = () => {
     setIsLoading(true);
 
     try {
+      if (!auth || !db) {
+        throw new Error('Firebase is not initialized. Please check your environment variables.');
+      }
+
       // Check if admin already exists
       const adminExists = await checkIfAdminExists();
       if (adminExists) {

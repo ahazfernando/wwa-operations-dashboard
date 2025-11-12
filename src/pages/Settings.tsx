@@ -113,6 +113,15 @@ const Settings = () => {
   };
 
   const handleRoleChange = async (userId: string, newRole: UserRole) => {
+    if (!db) {
+      toast({
+        title: 'Error',
+        description: 'Firebase is not initialized. Please check your environment variables.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     // Prevent changing own role to non-admin
     if (userId === currentUser?.id && newRole !== 'admin') {
       toast({
@@ -153,6 +162,15 @@ const Settings = () => {
 
   const handleFileUpload = async (userId: string, file: File) => {
     if (!file) return;
+
+    if (!storage || !db) {
+      toast({
+        title: 'Error',
+        description: 'Firebase is not initialized. Please check your environment variables.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     // Validate file type (PDF, DOC, DOCX)
     const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -262,6 +280,15 @@ const Settings = () => {
   };
 
   const handleGrantPermission = async () => {
+    if (!db) {
+      toast({
+        title: 'Error',
+        description: 'Firebase is not initialized. Please check your environment variables.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!selectedUser) {
       toast({
         title: 'Error',
