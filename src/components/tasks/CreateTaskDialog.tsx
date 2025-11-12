@@ -14,7 +14,7 @@ import { createTask } from '@/lib/tasks';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon } from 'lucide-react';
+import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -271,25 +271,48 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
 
           <div className="space-y-2">
             <Label>Assign Members *</Label>
-            <ScrollArea className="h-32 border rounded-md p-2">
-              <div className="space-y-2">
-                {users.map((user) => (
-                  <div key={user.id} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`member-${user.id}`}
-                      checked={formData.assignedMembers.includes(user.id)}
-                      onCheckedChange={() => handleMemberToggle(user.id)}
-                    />
-                    <label
-                      htmlFor={`member-${user.id}`}
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                    >
-                      {user.name} ({user.email})
-                    </label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  className={cn(
+                    "w-full justify-between",
+                    formData.assignedMembers.length === 0 && "text-muted-foreground"
+                  )}
+                >
+                  {formData.assignedMembers.length === 0
+                    ? "Select members..."
+                    : formData.assignedMembers.length === 1
+                    ? users.find(u => u.id === formData.assignedMembers[0])?.name || "1 member selected"
+                    : `${formData.assignedMembers.length} members selected`}
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[400px] p-0" align="start">
+                <ScrollArea className="h-64">
+                  <div className="p-2">
+                    <div className="space-y-2">
+                      {users.map((user) => (
+                        <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
+                          <Checkbox
+                            id={`member-${user.id}`}
+                            checked={formData.assignedMembers.includes(user.id)}
+                            onCheckedChange={() => handleMemberToggle(user.id)}
+                          />
+                          <label
+                            htmlFor={`member-${user.id}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                          >
+                            {user.name} ({user.email})
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </ScrollArea>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
             {formData.assignedMembers.length === 0 && (
               <p className="text-xs text-muted-foreground">Select at least one member</p>
             )}

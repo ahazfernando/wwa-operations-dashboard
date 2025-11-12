@@ -376,7 +376,7 @@ const Settings = () => {
                             onValueChange={(value) => handleRoleChange(user.id, value as UserRole)}
                             disabled={updatingRole[user.id]}
                           >
-                            <SelectTrigger className="w-[140px]">
+                            <SelectTrigger className="w-[140px] [&>span]:text-left [&>span]:m-0">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
