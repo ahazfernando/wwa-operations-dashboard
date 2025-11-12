@@ -47,11 +47,9 @@ const Login = () => {
     try {
       if (provider === 'google') {
         await signInWithGoogle();
-        // User will be redirected by ProtectedRoute based on status
         router.push('/dashboard');
       } else if (provider === 'github') {
         await signInWithGithub();
-        // User will be redirected by ProtectedRoute based on status
         router.push('/dashboard');
       }
     } catch (error: any) {
@@ -198,9 +196,9 @@ const Login = () => {
               </div>
             </div>
 
-            <Button 
-              type="submit" 
-              className="w-full bg-black text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-100" 
+            <Button
+              type="submit"
+              className="w-full bg-black text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-100"
               disabled={isLoading}
             >
               {isLoading ? 'Signing in...' : 'Sign In'}
