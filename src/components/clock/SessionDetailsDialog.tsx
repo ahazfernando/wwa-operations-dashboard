@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Edit } from 'lucide-react';
+import { Edit, Trash2 } from 'lucide-react';
 import { TimeEntry } from './types';
 import { formatDate, formatTime } from './utils';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface SessionDetailsDialogProps {
   open: boolean;
@@ -15,6 +16,7 @@ interface SessionDetailsDialogProps {
   selectedUserInfo: { name: string; email: string; date: Date } | null;
   isAdmin: boolean;
   onEditEntry: (entry: TimeEntry, sessionNumber: number) => void;
+  onDeleteEntry?: (entry: TimeEntry) => void;
 }
 
 export const SessionDetailsDialog = ({
@@ -24,6 +26,7 @@ export const SessionDetailsDialog = ({
   selectedUserInfo,
   isAdmin,
   onEditEntry,
+  onDeleteEntry,
 }: SessionDetailsDialogProps) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -85,17 +88,47 @@ export const SessionDetailsDialog = ({
                       </TableCell>
                       {isAdmin && (
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              onOpenChange(false);
-                              onEditEntry(session, index + 1);
-                            }}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      onOpenChange(false);
+                                      onEditEntry(session, index + 1);
+                                    }}
+                                    className="h-8 w-8 p-0"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Edit session</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            {onDeleteEntry && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => onDeleteEntry(session)}
+                                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Delete session</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                          </div>
                         </TableCell>
                       )}
                     </TableRow>

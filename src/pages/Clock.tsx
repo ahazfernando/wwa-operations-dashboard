@@ -11,15 +11,16 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Clock as ClockIcon, LogIn, LogOut, Calendar as CalendarIcon, Plus, Loader2, Users, Activity, Search, Edit, UserPlus } from 'lucide-react';
+import { Clock as ClockIcon, LogIn, LogOut, Calendar as CalendarIcon, Plus, Loader2, Users, Activity, Search, Edit, UserPlus, Trash2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, serverTimestamp, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, PaginationEllipsis } from '@/components/ui/pagination';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 interface TimeEntry {
   id: string;
@@ -113,6 +114,10 @@ const Clock = () => {
   const [clockUserDialogOpen, setClockUserDialogOpen] = useState(false);
   const [selectedUserForClock, setSelectedUserForClock] = useState<{ id: string; name: string; email: string } | null>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  
+  // Admin delete session states
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<TimeEntry | null>(null);
 
   useEffect(() => {
     // Update current time every second
@@ -570,6 +575,68 @@ const Clock = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update entry',
+        variant: 'destructive',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Function to handle delete session
+  const handleDeleteSession = async () => {
+    if (!sessionToDelete || !user || user.role !== 'admin') return;
+
+    try {
+      setSubmitting(true);
+      await deleteDoc(doc(db, 'timeEntries', sessionToDelete.id));
+
+      toast({
+        title: 'Success',
+        description: 'Session deleted successfully',
+      });
+
+      setDeleteDialogOpen(false);
+      setSessionToDelete(null);
+      
+      // Refresh data
+      await loadAllUsersEntries();
+      await loadActiveUsers();
+      
+      // If the session was in the currently displayed sessions, refresh them
+      if (selectedUserInfo) {
+        const dateString = format(selectedUserInfo.date, 'yyyy-MM-dd');
+        const q = query(
+          collection(db, 'timeEntries'),
+          where('userId', '==', sessionToDelete.userId),
+          where('dateString', '==', dateString)
+        );
+        const querySnapshot = await getDocs(q);
+        const sessions: TimeEntry[] = querySnapshot.docs.map((doc) => {
+          const data = getTimeEntryData(doc.data());
+          return {
+            id: doc.id,
+            userId: data.userId,
+            date: data.date.toDate(),
+            clockIn: data.clockIn?.toDate() || null,
+            clockOut: data.clockOut?.toDate() || null,
+            totalHours: data.totalHours || null,
+            createdAt: data.createdAt.toDate(),
+            updatedAt: data.updatedAt.toDate(),
+          };
+        });
+        // Sort client-side by clockIn time
+        sessions.sort((a, b) => {
+          if (!a.clockIn && !b.clockIn) return 0;
+          if (!a.clockIn) return 1;
+          if (!b.clockIn) return -1;
+          return a.clockIn.getTime() - b.clockIn.getTime();
+        });
+        setSelectedUserSessions(sessions);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete session',
         variant: 'destructive',
       });
     } finally {
@@ -2300,17 +2367,48 @@ const Clock = () => {
                         </TableCell>
                         {isAdmin && (
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setSessionDetailsOpen(false);
-                                handleEditEntry(session, index + 1);
-                              }}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSessionDetailsOpen(false);
+                                        handleEditEntry(session, index + 1);
+                                      }}
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Edit session</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSessionToDelete(session);
+                                        setDeleteDialogOpen(true);
+                                      }}
+                                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Delete session</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
                           </TableCell>
                         )}
                       </TableRow>
@@ -2334,6 +2432,46 @@ const Clock = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Session Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Session</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this session? This action cannot be undone.
+            </AlertDialogDescription>
+            {sessionToDelete && (
+              <div className="mt-2 p-2 bg-muted rounded text-sm">
+                <div><strong>Clock In:</strong> {formatTime(sessionToDelete.clockIn)}</div>
+                {sessionToDelete.clockOut && (
+                  <div><strong>Clock Out:</strong> {formatTime(sessionToDelete.clockOut)}</div>
+                )}
+                {sessionToDelete.totalHours && (
+                  <div><strong>Hours:</strong> {sessionToDelete.totalHours}h</div>
+                )}
+              </div>
+            )}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSession}
+              disabled={submitting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Session'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
