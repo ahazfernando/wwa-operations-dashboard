@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Task, TaskStatus } from '@/types/task';
+import { Task, TaskStatus, TaskImage } from '@/types/task';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -150,6 +150,10 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       .slice(0, 2);
   };
 
+  const getImageUrl = (image: string | TaskImage): string => {
+    return typeof image === 'string' ? image : image.url;
+  };
+
   return (
     <>
       <Card 
@@ -201,11 +205,11 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
               {task.images.slice(0, 3).map((image, index) => (
                 <div key={index} className="relative group">
                   <img
-                    src={image}
+                    src={getImageUrl(image)}
                     alt={`Task image ${index + 1}`}
                     className="w-16 h-16 object-cover rounded cursor-pointer"
                     onClick={() => {
-                      setSelectedImage(image);
+                      setSelectedImage(getImageUrl(image));
                       setImageDialogOpen(true);
                     }}
                   />
@@ -301,7 +305,7 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
             {task.images.map((image, index) => (
               <div key={index} className="relative group">
                 <img
-                  src={image}
+                  src={getImageUrl(image)}
                   alt={`Task image ${index + 1}`}
                   className="w-full h-48 object-cover rounded"
                 />
