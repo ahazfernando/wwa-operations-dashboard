@@ -52,3 +52,4 @@ export const getTimeEntryData = (data: unknown): FirestoreTimeEntry => {
   return data as FirestoreTimeEntry;
 };
 
+
