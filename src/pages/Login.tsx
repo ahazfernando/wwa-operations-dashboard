@@ -47,19 +47,17 @@ const Login = () => {
     try {
       if (provider === 'google') {
         await signInWithGoogle();
-        // User will be redirected by ProtectedRoute based on status
         router.push('/dashboard');
       } else if (provider === 'github') {
         await signInWithGithub();
-        // User will be redirected by ProtectedRoute based on status
         router.push('/dashboard');
       }
     } catch (error: any) {
-    toast({
+      toast({
         title: 'Sign in failed',
         description: error.message || `Failed to sign in with ${provider}`,
         variant: 'destructive',
-    });
+      });
     } finally {
       setIsLoading(false);
     }
@@ -187,11 +185,20 @@ const Login = () => {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <div className="mt-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => router.push('/reset')}
+                  className="text-sm text-primary hover:underline font-medium"
+                >
+                  Forgot password
+                </button>
+              </div>
             </div>
 
-            <Button 
-              type="submit" 
-              className="w-full bg-black text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-100" 
+            <Button
+              type="submit"
+              className="w-full bg-black text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-100"
               disabled={isLoading}
             >
               {isLoading ? 'Signing in...' : 'Sign In'}
@@ -207,7 +214,6 @@ const Login = () => {
               Sign up
             </button>
           </p>
-
         </div>
       </div>
     </div>
