@@ -28,7 +28,8 @@ import {
   FileText,
   LogOut,
   Settings,
-  User
+  User,
+  CheckSquare
 } from 'lucide-react';
 
 const menuItems = [
@@ -37,6 +38,7 @@ const menuItems = [
   { title: 'Clock In/Out', url: '/clock', icon: ClockIcon, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Employee Ratings', url: '/ratings', icon: Star, roles: ['admin', 'operationsstaff'] },
   { title: 'Lead Tracking', url: '/leads', icon: Users, roles: ['admin', 'operationsstaff', 'itteam'] },
+  { title: 'Tasks', url: '/tasks', icon: CheckSquare, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Leave Management', url: '/leave', icon: Calendar, roles: ['admin', 'operationsstaff'], badge: 'Soon' },
   { title: 'SaaS Config', url: '/saas', icon: DollarSign, roles: ['admin'], badge: 'Soon' },
   { title: 'CV Automation', url: '/cv-automation', icon: FileText, roles: ['admin', 'operationsstaff'], badge: 'Soon' },
