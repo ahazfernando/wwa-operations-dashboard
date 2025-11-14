@@ -22,6 +22,8 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { useToast } from '@/components/ui/use-toast'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   initializeApp,
   getApps,
@@ -38,8 +40,9 @@ import {
   setDoc,
 } from 'firebase/firestore'
 import { format } from 'date-fns'
-import { Upload } from 'lucide-react'
+import { Upload, CalendarIcon } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 const FormSchema = z.object({
   fullName: z.string().min(1, "Full name is required"),
@@ -151,6 +154,7 @@ const Profile: React.FC = () => {
   })
   const [loading, setLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [dobDate, setDobDate] = useState<Date | undefined>(undefined)
 
   const fileInputRefs = useRef<Record<UploadKey, HTMLInputElement | null>>({
     profilePhoto: null,
@@ -194,42 +198,101 @@ const Profile: React.FC = () => {
           const docSnap = await getDoc(doc(db, 'profiles', user.uid))
           if (docSnap.exists()) {
             const data = docSnap.data() as Partial<FullDataType>
-            // Set form values
-            Object.entries(data).forEach(([key, value]) => {
-              if (key === 'dob' && value) {
-                const date = new Date(value as string)
-                if (!isNaN(date.getTime())) {
-                  form.setValue('dob' as const, format(date, 'yyyy-MM-dd'))
-                }
-                return
+            
+            // Prepare form data with proper type conversions
+            const formData: Partial<FormDataType> = {}
+            
+            // Handle date of birth
+            if (data.dob) {
+              const date = new Date(data.dob as string)
+              if (!isNaN(date.getTime())) {
+                formData.dob = format(date, 'yyyy-MM-dd')
+                setDobDate(date) // Set the date state for the Calendar component
               }
-              if (key === 'emergency') {
-                const em = value as Partial<FormDataType['emergency']> || {}
-                form.setValue('emergency.fullName' as const, em.fullName || '')
-                form.setValue('emergency.relationship' as const, em.relationship || '')
-                form.setValue('emergency.phone' as const, em.phone || '')
-                return
+            }
+            
+            // Handle emergency contact
+            if (data.emergency) {
+              formData.emergency = {
+                fullName: (data.emergency as any)?.fullName || '',
+                relationship: (data.emergency as any)?.relationship || '',
+                phone: (data.emergency as any)?.phone || '',
               }
-              const scalarKeys: (keyof FormDataType)[] = [
-                'fullName', 'preferredName', 'email', 'phone', 'jobRole', 'workLocation',
-                'residentialAddress', 'postalCode', 'gender', 'employeeType', 'tfnAbn',
-                'idNumber', 'residingInAu', 'visaType', 'visaSubclass', 'declaration1', 'declaration2'
-              ]
-              if (scalarKeys.includes(key as keyof FormDataType)) {
-                form.setValue(key as keyof FormDataType, value as FormDataType[keyof FormDataType])
-                return
+            }
+            
+            // Handle scalar fields
+            const scalarKeys: (keyof FormDataType)[] = [
+              'fullName', 'preferredName', 'phone', 'jobRole', 'workLocation',
+              'residentialAddress', 'postalCode', 'gender', 'employeeType', 'tfnAbn',
+              'idNumber', 'visaType', 'visaSubclass'
+            ]
+            
+            scalarKeys.forEach((key) => {
+              if (data[key] !== undefined && data[key] !== null) {
+                formData[key] = data[key] as any
               }
             })
+            
+            // Handle boolean fields
+            if (data.residingInAu !== undefined) {
+              formData.residingInAu = Boolean(data.residingInAu)
+            }
+            if (data.declaration1 !== undefined) {
+              formData.declaration1 = Boolean(data.declaration1)
+            }
+            if (data.declaration2 !== undefined) {
+              formData.declaration2 = Boolean(data.declaration2)
+            }
+            
+            // Set email from Firebase Auth user if not in profile data
+            if (!data.email && user.email) {
+              formData.email = user.email
+            } else if (data.email) {
+              formData.email = data.email as string
+            }
+            
+            // Reset form with all the data at once
+            form.reset({
+              fullName: formData.fullName || '',
+              preferredName: formData.preferredName || '',
+              email: formData.email || user.email || '',
+              phone: formData.phone || '',
+              dob: formData.dob || '',
+              jobRole: formData.jobRole || '',
+              workLocation: (formData.workLocation as "Sri Lanka" | "Australia") || 'Sri Lanka',
+              residentialAddress: formData.residentialAddress || '',
+              postalCode: formData.postalCode || '',
+              gender: (formData.gender as "Male" | "Female" | "Prefer not to say") || 'Male',
+              employeeType: (formData.employeeType as "Subcontractor" | "Full-time" | "Part-time" | "Intern (Trainee)") || 'Full-time',
+              tfnAbn: formData.tfnAbn || '',
+              idNumber: formData.idNumber || '',
+              residingInAu: formData.residingInAu || false,
+              visaType: formData.visaType || '',
+              visaSubclass: formData.visaSubclass || '',
+              emergency: formData.emergency || {
+                fullName: '',
+                relationship: '',
+                phone: '',
+              },
+              declaration1: formData.declaration1 || false,
+              declaration2: formData.declaration2 || false,
+            })
+            
             // Set upload previews
             uploadKeys.forEach((key) => {
               if (data[key]) {
                 setUploads((prev) => ({ ...prev, [key]: { ...prev[key], preview: data[key] as string } }))
               }
             })
+          } else {
+            // If no profile exists, at least set the email from Firebase Auth
+            if (user.email) {
+              form.setValue('email', user.email)
+            }
           }
         } catch (error) {
           console.error('Error loading profile:', error)
-          toast({ variant: 'destructive', title: 'Error loading profile' })
+          toast({ variant: 'destructive', title: 'Error loading profile', description: 'Failed to load your profile data. Please try refreshing the page.' })
         } finally {
           setLoading(false)
         }
@@ -307,10 +370,27 @@ const Profile: React.FC = () => {
       // Revoke old blob URLs
       oldPreviewsToRevoke.forEach(URL.revokeObjectURL)
 
+      // Don't include email in the update - it should remain unchanged
+      const { email, ...valuesWithoutEmail } = values
+      
       const fullData: FullDataType = {
-        ...values,
+        ...valuesWithoutEmail,
         ...fileUrls,
         updatedAt: new Date().toISOString(),
+      }
+
+      // Only update email if it doesn't exist in the profile yet (for migration purposes)
+      // Otherwise, preserve the existing email or use the Firebase Auth email
+      const existingProfile = await getDoc(doc(db, 'profiles', currentUser.uid))
+      if (existingProfile.exists()) {
+        const existingData = existingProfile.data()
+        if (existingData.email) {
+          fullData.email = existingData.email
+        } else if (currentUser.email) {
+          fullData.email = currentUser.email
+        }
+      } else if (currentUser.email) {
+        fullData.email = currentUser.email
       }
 
       await setDoc(doc(db, 'profiles', currentUser.uid), fullData)
@@ -483,8 +563,15 @@ const Profile: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email Address</Label>
-              <Input id="email" type="email" {...form.register('email')} />
+              <Input 
+                id="email" 
+                type="email" 
+                {...form.register('email')} 
+                disabled 
+                className="bg-muted cursor-not-allowed opacity-60"
+              />
               {form.formState.errors.email && <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>}
+              <p className="text-xs text-muted-foreground">Email address cannot be changed</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="phone">Phone Number</Label>
@@ -493,7 +580,36 @@ const Profile: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="dob">Date of Birth</Label>
-              <Input id="dob" type="date" {...form.register('dob')} />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !dobDate && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dobDate ? format(dobDate, "PPP") : <span>Pick a date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dobDate}
+                    onSelect={(date) => {
+                      if (date) {
+                        setDobDate(date)
+                        form.setValue('dob', format(date, 'yyyy-MM-dd'))
+                      }
+                    }}
+                    initialFocus
+                    disabled={(date) =>
+                      date > new Date() || date < new Date('1900-01-01')
+                    }
+                  />
+                </PopoverContent>
+              </Popover>
               {form.formState.errors.dob && <p className="text-sm text-destructive">{form.formState.errors.dob.message}</p>}
             </div>
             <div className="space-y-2">
@@ -503,9 +619,9 @@ const Profile: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="workLocation">Work Location</Label>
-              <Select onValueChange={(v) => form.setValue('workLocation', v as "Sri Lanka" | "Australia")} defaultValue={form.watch('workLocation')}>
+              <Select onValueChange={(v) => form.setValue('workLocation', v as "Sri Lanka" | "Australia")} value={form.watch('workLocation')}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select work location" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Sri Lanka">Sri Lanka</SelectItem>
@@ -515,9 +631,9 @@ const Profile: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="gender">Gender</Label>
-              <Select onValueChange={(v) => form.setValue('gender', v as "Male" | "Female" | "Prefer not to say")} defaultValue={form.watch('gender')}>
+              <Select onValueChange={(v) => form.setValue('gender', v as "Male" | "Female" | "Prefer not to say")} value={form.watch('gender')}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select gender" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Male">Male</SelectItem>
@@ -538,9 +654,9 @@ const Profile: React.FC = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="employeeType">Employee Type</Label>
-              <Select onValueChange={(v) => form.setValue('employeeType', v as "Subcontractor" | "Full-time" | "Part-time" | "Intern (Trainee)")} defaultValue={form.watch('employeeType')}>
+              <Select onValueChange={(v) => form.setValue('employeeType', v as "Subcontractor" | "Full-time" | "Part-time" | "Intern (Trainee)")} value={form.watch('employeeType')}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select employee type" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Subcontractor">Subcontractor</SelectItem>

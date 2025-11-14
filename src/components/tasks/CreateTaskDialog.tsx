@@ -10,10 +10,10 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { createTask } from '@/lib/tasks';
-import { uploadImageToCloudinary } from '@/lib/cloudinary';
+import { uploadImageToCloudinary, uploadFileToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, ChevronDown, Upload, Clock, Repeat, Search } from 'lucide-react';
+import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, FileText, ChevronDown, Upload, Clock, Repeat, Search } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -56,14 +56,16 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
   const validateAndAddFiles = (files: File[]) => {
     if (files.length === 0) return;
 
-    // Validate file types
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    // Validate file types - allow images and PDFs
+    const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const validPdfTypes = ['application/pdf'];
+    const validTypes = [...validImageTypes, ...validPdfTypes];
     const invalidFiles = files.filter(file => !validTypes.includes(file.type));
     
     if (invalidFiles.length > 0) {
       toast({
         title: 'Invalid file type',
-        description: 'Please upload only image files (JPEG, PNG, GIF, WebP)',
+        description: 'Please upload only image files (JPEG, PNG, GIF, WebP) or PDF documents',
         variant: 'destructive',
       });
       return;
@@ -93,13 +95,19 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
 
     setSelectedFiles(prev => [...prev, ...files]);
     
-    // Create previews
+    // Create previews for image files only
     files.forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreviews(prev => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
+      // Only create image previews for image files
+      if (validImageTypes.includes(file.type)) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setImagePreviews(prev => [...prev, reader.result as string]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        // For PDFs, add empty string to maintain index alignment
+        setImagePreviews(prev => [...prev, '']);
+      }
     });
   };
 
@@ -168,17 +176,26 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
       setLoading(true);
       setUploadingImages(true);
 
-      // Upload images to Cloudinary
+      // Upload files to Cloudinary (images and PDFs)
       const uploadedImages: string[] = [];
+      const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+      
       for (const file of selectedFiles) {
         try {
-          const result = await uploadImageToCloudinary(file);
+          let result;
+          // Use appropriate upload function based on file type
+          if (validImageTypes.includes(file.type)) {
+            result = await uploadImageToCloudinary(file);
+          } else {
+            // PDFs and other documents
+            result = await uploadFileToCloudinary(file);
+          }
           uploadedImages.push(result.url);
         } catch (error: any) {
-          console.error('Error uploading image:', error);
+          console.error('Error uploading file:', error);
           toast({
-            title: 'Image upload failed',
-            description: `Failed to upload ${file.name}. Continuing with other images...`,
+            title: 'File upload failed',
+            description: `Failed to upload ${file.name}. Continuing with other files...`,
             variant: 'destructive',
           });
         }
@@ -486,7 +503,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           </div>
 
           <div className="space-y-2">
-            <Label>Images</Label>
+            <Label>Files</Label>
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -497,12 +514,12 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                   ? "border-primary bg-primary/10"
                   : "border-muted-foreground/25 hover:border-muted-foreground/50"
               )}
-              onClick={() => document.getElementById('images-input')?.click()}
+              onClick={() => document.getElementById('files-input')?.click()}
             >
               <input
-                id="images-input"
+                id="files-input"
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 multiple
                 onChange={handleFileSelect}
                 disabled={uploadingImages}
@@ -515,7 +532,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                 <div className="space-y-1">
                   <p className="text-sm font-medium">Drag & drop files here</p>
                   <p className="text-xs text-muted-foreground">
-                    Or click to browse (max 2 files, up to 5MB each)
+                    Or click to browse (max 2 files, up to 5MB each) - Images or PDFs
                   </p>
                 </div>
                 <Button
@@ -524,7 +541,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                   size="sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    document.getElementById('images-input')?.click();
+                    document.getElementById('files-input')?.click();
                   }}
                   disabled={uploadingImages}
                 >
@@ -532,24 +549,38 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                 </Button>
               </div>
             </div>
-            {imagePreviews.length > 0 && (
+            {selectedFiles.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mt-2">
-                {imagePreviews.map((preview, index) => (
-                  <div key={index} className="relative group">
-                    <img
-                      src={preview}
-                      alt={`Preview ${index + 1}`}
-                      className="w-full h-20 object-cover rounded"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(index)}
-                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
+                {selectedFiles.map((file, index) => {
+                  const isImage = file.type.startsWith('image/');
+                  const isPdf = file.type === 'application/pdf';
+                  
+                  return (
+                    <div key={index} className="relative group">
+                      {isImage && imagePreviews[index] ? (
+                        <img
+                          src={imagePreviews[index]}
+                          alt={`Preview ${index + 1}`}
+                          className="w-full h-20 object-cover rounded"
+                        />
+                      ) : isPdf ? (
+                        <div className="w-full h-20 bg-muted rounded flex flex-col items-center justify-center gap-1">
+                          <FileText className="h-8 w-8 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground truncate px-1 max-w-full">
+                            {file.name}
+                          </span>
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -567,7 +598,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
               {loading || uploadingImages ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {uploadingImages ? 'Uploading images...' : 'Creating...'}
+                  {uploadingImages ? 'Uploading files...' : 'Creating...'}
                 </>
               ) : (
                 'Create Task'

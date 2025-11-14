@@ -101,6 +101,7 @@ const Clock = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState<'most' | 'least' | 'none'>('none');
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [individualEntriesPage, setIndividualEntriesPage] = useState(1);
   const [mergedEntriesPage, setMergedEntriesPage] = useState(1);
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
@@ -1808,6 +1809,16 @@ const Clock = () => {
                           <SelectItem value="11">December</SelectItem>
                         </SelectContent>
                       </Select>
+                      <Select value={statusFilter} onValueChange={(value: 'all' | 'active' | 'completed') => setStatusFilter(value)}>
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All status</SelectItem>
+                          <SelectItem value="active">Active only</SelectItem>
+                          <SelectItem value="completed">Completed only</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -1852,19 +1863,37 @@ const Clock = () => {
                           }
                         }
                         
+                        // Status filter
+                        if (statusFilter === 'active') {
+                          if (!entry.isActive) {
+                            return false;
+                          }
+                        } else if (statusFilter === 'completed') {
+                          if (entry.isActive) {
+                            return false;
+                          }
+                        }
+                        
                         return true;
                       });
 
-                      // Sort by hours
-                      if (sortOrder === 'most') {
-                        filteredEntries = [...filteredEntries].sort((a, b) => {
+                      // Sort: Active users first, then by hours if specified
+                      filteredEntries = [...filteredEntries].sort((a, b) => {
+                        // First, sort by active status (active users first)
+                        if (a.isActive !== b.isActive) {
+                          return a.isActive ? -1 : 1; // Active (true) comes before completed (false)
+                        }
+                        
+                        // If both have the same status, apply hour-based sorting if specified
+                        if (sortOrder === 'most') {
                           return b.totalHours - a.totalHours;
-                        });
-                      } else if (sortOrder === 'least') {
-                        filteredEntries = [...filteredEntries].sort((a, b) => {
+                        } else if (sortOrder === 'least') {
                           return a.totalHours - b.totalHours;
-                        });
-                      }
+                        }
+                        
+                        // If no sorting specified, maintain original order within each status group
+                        return 0;
+                      });
 
                       // Pagination
                       const itemsPerPage = 5;
@@ -1875,7 +1904,7 @@ const Clock = () => {
 
                       return filteredEntries.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-8">
-                          {searchQuery || selectedMonth !== 'all' ? 'No merged entries found matching your filters' : 'No merged entries found for this date'}
+                          {searchQuery || selectedMonth !== 'all' || statusFilter !== 'all' ? 'No merged entries found matching your filters' : 'No merged entries found for this date'}
                         </p>
                       ) : (
                         <div className="overflow-x-auto">
