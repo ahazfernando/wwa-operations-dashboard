@@ -11,10 +11,13 @@ import { DraggableTaskCard } from '@/components/tasks/DraggableTaskCard';
 import { DroppableColumn } from '@/components/tasks/DroppableColumn';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailsDialog } from '@/components/tasks/TaskDetailsDialog';
-import { getAllTasks, getTasksByUser, updateTaskStatus } from '@/lib/tasks';
+import { getAllTasks, getTasksByUser, updateTaskStatus, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
 import { Task, TaskStatus } from '@/types/task';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, Plus, Search, CalendarIcon, X } from 'lucide-react';
+import { Plus, Search, CalendarIcon, X, CheckCircle2 } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { type DateRange } from 'react-day-picker';
 import { cn } from '@/lib/utils';
@@ -40,6 +43,8 @@ const Tasks = () => {
   const [draggedOverColumn, setDraggedOverColumn] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskDetailsOpen, setTaskDetailsOpen] = useState(false);
+  const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
+  const [loadingCompleted, setLoadingCompleted] = useState(false);
   
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,6 +67,7 @@ const Tasks = () => {
 
   useEffect(() => {
     loadTasks();
+    loadCompletedTasks();
   }, [user, filter]);
 
   const loadUsers = async () => {
@@ -104,6 +110,39 @@ const Tasks = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCompletedTasks = async () => {
+    try {
+      setLoadingCompleted(true);
+      let fetchedTasks: Task[];
+
+      if (isAdmin) {
+        fetchedTasks = await getCompletedTasks();
+      } else if (user) {
+        fetchedTasks = await getCompletedTasksByUser(user.id);
+      } else {
+        fetchedTasks = [];
+      }
+
+      // Sort by completion date (most recent first)
+      fetchedTasks.sort((a, b) => {
+        const aCompleted = a.statusHistory?.find(h => h.status === 'Complete')?.timestamp || a.updatedAt;
+        const bCompleted = b.statusHistory?.find(h => h.status === 'Complete')?.timestamp || b.updatedAt;
+        return bCompleted.getTime() - aCompleted.getTime();
+      });
+
+      // Limit to 10 most recent completed tasks
+      setCompletedTasks(fetchedTasks.slice(0, 10));
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load completed tasks',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingCompleted(false);
     }
   };
 
@@ -268,8 +307,32 @@ const Tasks = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-9 w-32" />
+            <Skeleton className="h-5 w-64" />
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <Skeleton className="h-10 flex-1 sm:max-w-sm" />
+          <Skeleton className="h-10 w-full sm:w-[300px]" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="space-y-4">
+              <div className="space-y-2">
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, j) => (
+                  <Skeleton key={j} className="h-32 rounded-lg" />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -419,6 +482,93 @@ const Tasks = () => {
         </DragOverlay>
       </DndContext>
 
+      {/* Completed Tasks Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-green-600" />
+            Completed Tasks
+          </CardTitle>
+          <CardDescription>
+            Recently completed tasks - Click on a task to view details
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingCompleted ? (
+            <div className="space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 p-3 border rounded-lg">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 flex-1" />
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              ))}
+            </div>
+          ) : completedTasks.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <CheckCircle2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>No completed tasks yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Task ID</TableHead>
+                    <TableHead>Task Name</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Completed Date</TableHead>
+                    <TableHead>Due Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {completedTasks.map((task) => {
+                    const completionDate = task.statusHistory?.find(h => h.status === 'Complete')?.timestamp || task.updatedAt;
+                    return (
+                      <TableRow
+                        key={task.id}
+                        className="cursor-pointer hover:bg-accent"
+                        onClick={() => handleTaskCardClick(task)}
+                      >
+                        <TableCell className="font-mono text-sm">
+                          {task.taskId}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {task.name}
+                        </TableCell>
+                        <TableCell>
+                          {task.assignedMemberNames && task.assignedMemberNames.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {task.assignedMemberNames.slice(0, 2).map((name, idx) => (
+                                <span key={idx} className="text-sm">{name}</span>
+                              ))}
+                              {task.assignedMemberNames.length > 2 && (
+                                <span className="text-xs text-muted-foreground">
+                                  +{task.assignedMemberNames.length - 2} more
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">Unassigned</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {format(completionDate, 'MMM dd, yyyy')}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {format(task.date, 'MMM dd, yyyy')}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Task Details Dialog */}
       <TaskDetailsDialog
         task={selectedTask}
@@ -427,6 +577,7 @@ const Tasks = () => {
         users={users}
         onTaskUpdated={() => {
           loadTasks();
+          loadCompletedTasks();
           setTaskDetailsOpen(false);
         }}
       />

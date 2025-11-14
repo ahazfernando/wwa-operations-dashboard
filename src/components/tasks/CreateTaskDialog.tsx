@@ -9,12 +9,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { createTask } from '@/lib/tasks';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, ChevronDown, Upload, Clock } from 'lucide-react';
+import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, ChevronDown, Upload, Clock, Repeat, Search } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -45,11 +45,13 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     kpi: '',
     eta: undefined as Date | undefined,
     time: '09:00',
+    recurring: false,
   });
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
 
   const validateAndAddFiles = (files: File[]) => {
     if (files.length === 0) return;
@@ -204,6 +206,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         time: formData.time || undefined,
         createdBy: user?.id || '',
         createdByName: user?.name || '',
+        recurring: formData.recurring,
       });
 
       toast({
@@ -222,9 +225,11 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         kpi: '',
         eta: undefined,
         time: '09:00',
+        recurring: false,
       });
       setSelectedFiles([]);
       setImagePreviews([]);
+      setMemberSearchQuery('');
       setOpen(false);
       onTaskCreated?.();
     } catch (error: any) {
@@ -352,14 +357,37 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="time">Time</Label>
-            <Input
-              id="time"
-              type="time"
-              value={formData.time}
-              onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="time">Time</Label>
+              <Input
+                id="time"
+                type="time"
+                value={formData.time}
+                onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recurring">Recurring Task</Label>
+              <Select
+                value={formData.recurring ? 'yes' : 'no'}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, recurring: value === 'yes' }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select option" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no">No</SelectItem>
+                  <SelectItem value="yes">Yes</SelectItem>
+                </SelectContent>
+              </Select>
+              {formData.recurring && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Repeat className="h-3 w-3" />
+                  This task will automatically recreate when completed
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -382,28 +410,74 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                   <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[400px] p-0" align="start">
-                <ScrollArea className="h-64">
+              <PopoverContent className="w-[400px] p-0" align="start" onWheel={(e) => e.stopPropagation()}>
+                <div className="p-3 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search members..."
+                      value={memberSearchQuery}
+                      onChange={(e) => setMemberSearchQuery(e.target.value)}
+                      className="pl-10"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                </div>
+                <div 
+                  className="max-h-64 overflow-y-auto overscroll-contain"
+                  style={{ maxHeight: '16rem' }}
+                  tabIndex={0}
+                  onWheel={(e) => {
+                    e.stopPropagation();
+                    const target = e.currentTarget;
+                    const { scrollTop, scrollHeight, clientHeight } = target;
+                    const maxScroll = scrollHeight - clientHeight;
+                    const newScrollTop = Math.max(0, Math.min(maxScroll, scrollTop + e.deltaY));
+                    target.scrollTop = newScrollTop;
+                    e.preventDefault();
+                  }}
+                >
                   <div className="p-2">
                     <div className="space-y-2">
-                      {users.map((user) => (
-                        <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
-                          <Checkbox
-                            id={`member-${user.id}`}
-                            checked={formData.assignedMembers.includes(user.id)}
-                            onCheckedChange={() => handleMemberToggle(user.id)}
-                          />
-                          <label
-                            htmlFor={`member-${user.id}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                          >
-                            {user.name}
-                          </label>
+                      {users
+                        .filter((user) => {
+                          if (!memberSearchQuery.trim()) return true;
+                          const query = memberSearchQuery.toLowerCase();
+                          return (
+                            user.name.toLowerCase().includes(query) ||
+                            user.email.toLowerCase().includes(query)
+                          );
+                        })
+                        .map((user) => (
+                          <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
+                            <Checkbox
+                              id={`member-${user.id}`}
+                              checked={formData.assignedMembers.includes(user.id)}
+                              onCheckedChange={() => handleMemberToggle(user.id)}
+                            />
+                            <label
+                              htmlFor={`member-${user.id}`}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                            >
+                              {user.name}
+                            </label>
+                          </div>
+                        ))}
+                      {users.filter((user) => {
+                        if (!memberSearchQuery.trim()) return false;
+                        const query = memberSearchQuery.toLowerCase();
+                        return (
+                          user.name.toLowerCase().includes(query) ||
+                          user.email.toLowerCase().includes(query)
+                        );
+                      }).length === 0 && (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          No members found
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
-                </ScrollArea>
+                </div>
               </PopoverContent>
             </Popover>
             {formData.assignedMembers.length === 0 && (

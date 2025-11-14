@@ -30,6 +30,8 @@ export interface Task {
   createdBy: string; // Admin user ID who created the task
   createdByName?: string; // Admin name for display
   statusHistory?: StatusChange[]; // History of status changes
+  recurring?: boolean; // Whether this task should recur when completed
+  parentTaskId?: string; // ID of the original recurring task (for tracking recurring instances)
 }
 
 export interface FirestoreTask {
@@ -55,5 +57,7 @@ export interface FirestoreTask {
     changedBy?: string;
     changedByName?: string;
   }>;
+  recurring?: boolean;
+  parentTaskId?: string;
 }
 

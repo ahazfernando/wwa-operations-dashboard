@@ -44,6 +44,8 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     createdBy: docData.createdBy || '',
     createdByName: docData.createdByName || '',
     statusHistory: statusHistory.length > 0 ? statusHistory : undefined,
+    recurring: docData.recurring || false,
+    parentTaskId: docData.parentTaskId || undefined,
   };
 }
 
@@ -63,6 +65,8 @@ export async function createTask(taskData: {
   time?: string;
   createdBy: string;
   createdByName: string;
+  recurring?: boolean;
+  parentTaskId?: string;
 }): Promise<string> {
   if (!db) {
     throw new Error('Firebase is not initialized. Please check your environment variables.');
@@ -93,6 +97,8 @@ export async function createTask(taskData: {
       createdBy: taskData.createdBy,
       createdByName: taskData.createdByName,
       statusHistory: initialStatusHistory,
+      recurring: taskData.recurring || false,
+      parentTaskId: taskData.parentTaskId || null,
     });
 
     return docRef.id;
@@ -147,6 +153,47 @@ export async function updateTaskStatus(
         statusHistory: updatedHistory,
         updatedAt: now,
       });
+
+      // If task is being marked as Complete and it's a recurring task, create a new instance
+      if (status === 'Complete' && currentData.recurring === true) {
+        try {
+          // Generate a new task ID by appending a timestamp or incrementing
+          const baseTaskId = currentData.taskId;
+          const timestamp = Date.now();
+          const newTaskId = `${baseTaskId}-${timestamp}`;
+          
+          // Use the original task's ID as parentTaskId (or use the existing parentTaskId if this is already a recurring instance)
+          const parentId = currentData.parentTaskId || taskId;
+          
+          // Convert Firestore timestamp to Date if needed
+          const etaDate = currentData.eta 
+            ? (currentData.eta.toDate ? currentData.eta.toDate() : new Date(currentData.eta))
+            : undefined;
+          
+          // Create new task with same scope but new ID and current date
+          const newTaskData = {
+            taskId: newTaskId,
+            name: currentData.name,
+            description: currentData.description,
+            date: new Date(), // New date for the recurring task
+            assignedMembers: currentData.assignedMembers,
+            assignedMemberNames: currentData.assignedMemberNames || [],
+            images: [], // Start with no images for the new instance
+            kpi: currentData.kpi || '',
+            eta: etaDate,
+            time: currentData.time || '',
+            createdBy: options?.changedBy || currentData.createdBy,
+            createdByName: options?.changedByName || currentData.createdByName,
+            recurring: true, // Keep it as recurring
+            parentTaskId: parentId, // Link to the original recurring task
+          };
+
+          await createTask(newTaskData);
+        } catch (error) {
+          // Log error but don't fail the status update
+          console.error('Error creating recurring task instance:', error);
+        }
+      }
     } else {
       // Status hasn't changed, just update updatedAt
       await updateDoc(doc(db, 'tasks', taskId), {

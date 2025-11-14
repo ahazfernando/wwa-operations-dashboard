@@ -38,7 +38,8 @@ import {
   setDoc,
 } from 'firebase/firestore'
 import { format } from 'date-fns'
-import { Upload, Loader2 } from 'lucide-react'
+import { Upload } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 
 const FormSchema = z.object({
   fullName: z.string().min(1, "Full name is required"),
@@ -412,10 +413,24 @@ const Profile: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-16 h-16 border-4 border-border border-t-primary rounded-full animate-spin" />
-          <p className="text-sm font-medium text-muted-foreground">Loading profile...</p>
+      <div className="space-y-6">
+        <Skeleton className="h-10 w-48" />
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-40 w-40 rounded-full" />
+          </div>
+          <div className="space-y-4">
+            <Skeleton className="h-6 w-40" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     )

@@ -19,7 +19,6 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
   AlertDialog,
@@ -35,7 +34,7 @@ import { updateTask, updateTaskStatus, updateTaskImages, deleteTask } from '@/li
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload } from 'lucide-react';
+import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -85,6 +84,7 @@ export function TaskDetailsDialog({
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [imageDescriptions, setImageDescriptions] = useState<{ [key: number]: string }>({});
   const [isDragging, setIsDragging] = useState(false);
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
 
   useEffect(() => {
     if (task) {
@@ -110,6 +110,7 @@ export function TaskDetailsDialog({
       });
       setImageDescriptions(descriptions);
       setIsEditing(false);
+      setMemberSearchQuery('');
     }
   }, [task]);
 
@@ -296,6 +297,7 @@ export function TaskDetailsDialog({
       setImagePreviews([]);
       setSelectedFiles([]);
       setImageDescriptions({});
+      setMemberSearchQuery('');
       onTaskUpdated?.();
     } catch (error: any) {
       toast({
@@ -604,28 +606,74 @@ export function TaskDetailsDialog({
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[400px] p-0" align="start">
-                  <ScrollArea className="h-64">
+                <PopoverContent className="w-[400px] p-0" align="start" onWheel={(e) => e.stopPropagation()}>
+                  <div className="p-3 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search members..."
+                        value={memberSearchQuery}
+                        onChange={(e) => setMemberSearchQuery(e.target.value)}
+                        className="pl-10"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+                  <div 
+                    className="max-h-64 overflow-y-auto overscroll-contain"
+                    style={{ maxHeight: '16rem' }}
+                    tabIndex={0}
+                    onWheel={(e) => {
+                      e.stopPropagation();
+                      const target = e.currentTarget;
+                      const { scrollTop, scrollHeight, clientHeight } = target;
+                      const maxScroll = scrollHeight - clientHeight;
+                      const newScrollTop = Math.max(0, Math.min(maxScroll, scrollTop + e.deltaY));
+                      target.scrollTop = newScrollTop;
+                      e.preventDefault();
+                    }}
+                  >
                     <div className="p-2">
                       <div className="space-y-2">
-                        {users.map((user) => (
-                          <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
-                            <Checkbox
-                              id={`member-${user.id}`}
-                              checked={formData.assignedMembers.includes(user.id)}
-                              onCheckedChange={() => handleMemberToggle(user.id)}
-                            />
-                            <label
-                              htmlFor={`member-${user.id}`}
-                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                            >
-                              {user.name}
-                            </label>
+                        {users
+                          .filter((user) => {
+                            if (!memberSearchQuery.trim()) return true;
+                            const query = memberSearchQuery.toLowerCase();
+                            return (
+                              user.name.toLowerCase().includes(query) ||
+                              user.email.toLowerCase().includes(query)
+                            );
+                          })
+                          .map((user) => (
+                            <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
+                              <Checkbox
+                                id={`member-${user.id}`}
+                                checked={formData.assignedMembers.includes(user.id)}
+                                onCheckedChange={() => handleMemberToggle(user.id)}
+                              />
+                              <label
+                                htmlFor={`member-${user.id}`}
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                              >
+                                {user.name}
+                              </label>
+                            </div>
+                          ))}
+                        {users.filter((user) => {
+                          if (!memberSearchQuery.trim()) return false;
+                          const query = memberSearchQuery.toLowerCase();
+                          return (
+                            user.name.toLowerCase().includes(query) ||
+                            user.email.toLowerCase().includes(query)
+                          );
+                        }).length === 0 && (
+                          <div className="p-4 text-center text-sm text-muted-foreground">
+                            No members found
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
-                  </ScrollArea>
+                  </div>
                 </PopoverContent>
               </Popover>
             ) : (

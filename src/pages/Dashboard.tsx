@@ -10,7 +10,8 @@ import { getTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ActiveUsersSection } from '@/components/ActiveUsersSection';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -142,6 +143,9 @@ const Dashboard = () => {
         </Card>
       </div>
 
+      {/* Active Users and Recent Clock Outs Section */}
+      <ActiveUsersSection />
+
       {/* Assigned Tasks Section */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -156,8 +160,20 @@ const Dashboard = () => {
         </CardHeader>
         <CardContent>
           {loadingTasks ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between p-3 border rounded-lg space-x-4">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-5 w-16" />
+                      <Skeleton className="h-4 w-20" />
+                    </div>
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                  <Skeleton className="h-4 w-4" />
+                </div>
+              ))}
             </div>
           ) : assignedTasks.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">

@@ -11,7 +11,8 @@ import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, PaginationEllipsis } from '@/components/ui/pagination';
-import { Calendar as CalendarIcon, Search, Loader2, Edit, LogIn, LogOut } from 'lucide-react';
+import { Calendar as CalendarIcon, Search, Edit, LogIn, LogOut } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { TimeEntry, ActiveUser } from './types';
 import { formatDate, formatTime } from './utils';
@@ -181,8 +182,23 @@ export const IndividualEntriesTable = ({
       </CardHeader>
       <CardContent>
         {loadingAdmin ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="space-y-4">
+            <div className="overflow-x-auto">
+              <div className="space-y-3">
+                <div className="grid grid-cols-8 gap-4 pb-2 border-b">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="h-4 w-20" />
+                  ))}
+                </div>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="grid grid-cols-8 gap-4 py-2">
+                    {Array.from({ length: 8 }).map((_, j) => (
+                      <Skeleton key={j} className="h-8 w-full" />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : filteredEntries.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">

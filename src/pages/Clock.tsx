@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Clock as ClockIcon, LogIn, LogOut, Calendar as CalendarIcon, Plus, Loader2, Users, Activity, Search, Edit, UserPlus, Trash2 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { type DateRange } from 'react-day-picker';
@@ -1467,8 +1468,23 @@ const Clock = () => {
               </CardHeader>
               <CardContent>
                 {loadingAdmin ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-8 gap-4 pb-2 border-b">
+                          {Array.from({ length: 8 }).map((_, i) => (
+                            <Skeleton key={i} className="h-4 w-20" />
+                          ))}
+                        </div>
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <div key={i} className="grid grid-cols-8 gap-4 py-2">
+                            {Array.from({ length: 8 }).map((_, j) => (
+                              <Skeleton key={j} className="h-8 w-full" />
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 ) : (() => {
                   let filteredEntries = allUsersEntries.filter((entry) => {
@@ -1796,8 +1812,23 @@ const Clock = () => {
                   </CardHeader>
                   <CardContent>
                     {loadingAdmin ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <div className="space-y-4">
+                        <div className="overflow-x-auto">
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-9 gap-4 pb-2 border-b">
+                              {Array.from({ length: 9 }).map((_, i) => (
+                                <Skeleton key={i} className="h-4 w-20" />
+                              ))}
+                            </div>
+                            {Array.from({ length: 5 }).map((_, i) => (
+                              <div key={i} className="grid grid-cols-9 gap-4 py-2">
+                                {Array.from({ length: 9 }).map((_, j) => (
+                                  <Skeleton key={j} className="h-8 w-full" />
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     ) : (() => {
                       const mergedEntries = mergeEntriesByUserAndDate(allUsersEntries);
@@ -2057,8 +2088,23 @@ const Clock = () => {
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-5 gap-4 pb-2 border-b">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Skeleton key={i} className="h-4 w-20" />
+                          ))}
+                        </div>
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <div key={i} className="grid grid-cols-5 gap-4 py-2">
+                            {Array.from({ length: 5 }).map((_, j) => (
+                              <Skeleton key={j} className="h-8 w-full" />
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 ) : timeEntries.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">

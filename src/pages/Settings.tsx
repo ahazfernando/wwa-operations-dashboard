@@ -9,13 +9,16 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserRole } from '@/contexts/AuthContext';
-import { Check, X, Loader2, Upload, FileText, Download, Search } from 'lucide-react';
+import { Check, X, Upload, FileText, Download, Search, History } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
 
 const Settings = () => {
   const { approveUser, rejectUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
+  const router = useRouter();
   const [pendingUsers, setPendingUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -388,8 +391,23 @@ const Settings = () => {
             </Select>
           </div>
           {usersLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-7 gap-4 pb-2 border-b">
+                    {Array.from({ length: 7 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-7 gap-4 py-2">
+                      {Array.from({ length: 7 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (() => {
             // Filter users based on search query and job role
@@ -444,8 +462,7 @@ const Settings = () => {
                       <TableCell>
                         {updatingRole[user.id] ? (
                           <div className="flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                            <span className="text-sm text-muted-foreground">Updating...</span>
+                            <Skeleton className="h-8 w-[140px]" />
                           </div>
                         ) : (
                           <Select
@@ -524,7 +541,7 @@ const Settings = () => {
                             disabled={uploading[user.id]}
                           >
                             {uploading[user.id] ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <Skeleton className="h-4 w-16" />
                             ) : (
                               <>
                                 <Upload className="h-4 w-4 mr-1" />
@@ -553,8 +570,23 @@ const Settings = () => {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-5 gap-4 pb-2 border-b">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-5 gap-4 py-2">
+                      {Array.from({ length: 5 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : pendingUsers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
@@ -608,7 +640,7 @@ const Settings = () => {
                           disabled={processing === pendingUser.id}
                         >
                           {processing === pendingUser.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <Skeleton className="h-4 w-16" />
                           ) : (
                             <>
                               <Check className="h-4 w-4 mr-1" />
@@ -623,7 +655,7 @@ const Settings = () => {
                           disabled={processing === pendingUser.id}
                         >
                           {processing === pendingUser.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <Skeleton className="h-4 w-16" />
                           ) : (
                             <>
                               <X className="h-4 w-4 mr-1" />
@@ -650,8 +682,10 @@ const Settings = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           {loadingItUsers ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <div className="space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-32" />
             </div>
           ) : itTeamUsers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
@@ -718,10 +752,7 @@ const Settings = () => {
                 disabled={!selectedUser || grantingPermission}
               >
                 {grantingPermission ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Granting...
-                  </>
+                  <Skeleton className="h-4 w-24" />
                 ) : (
                   'Grant Permission'
                 )}
@@ -751,6 +782,19 @@ const Settings = () => {
               <strong>Employee:</strong> Access to Clock In/Out and personal information only
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Task Management</CardTitle>
+          <CardDescription>View and manage task history</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={() => router.push('/task-history')} variant="outline">
+            <History className="h-4 w-4 mr-2" />
+            View Task History
+          </Button>
         </CardContent>
       </Card>
 
