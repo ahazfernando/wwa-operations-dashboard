@@ -30,11 +30,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { updateTask, updateTaskStatus, updateTaskImages, deleteTask } from '@/lib/tasks';
+import { updateTask, updateTaskStatus, updateTaskImages, deleteTask, createTask } from '@/lib/tasks';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search } from 'lucide-react';
+import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search, Copy } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -67,6 +67,7 @@ export function TaskDetailsDialog({
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isCloning, setIsCloning] = useState(false);
 
   const [formData, setFormData] = useState({
     taskId: '',
@@ -379,6 +380,57 @@ export function TaskDetailsDialog({
     }
   };
 
+  const handleClone = async () => {
+    if (!task) return;
+
+    try {
+      setIsCloning(true);
+
+      // Generate a new task ID
+      const timestamp = Date.now();
+      const newTaskId = `${task.taskId}-COPY-${timestamp}`;
+
+      // Get assigned member names
+      const assignedMemberNames = task.assignedMemberNames || task.assignedMembers.map(userId => {
+        const user = users.find(u => u.id === userId);
+        return user?.name || '';
+      }).filter(Boolean);
+
+      // Clone the task with all the same data
+      await createTask({
+        taskId: newTaskId,
+        name: `${task.name} (Copy)`,
+        description: task.description,
+        date: new Date(), // Use current date for the cloned task
+        assignedMembers: task.assignedMembers,
+        assignedMemberNames,
+        images: task.images, // Copy image URLs
+        kpi: task.kpi || undefined,
+        eta: task.eta,
+        time: task.time || undefined,
+        createdBy: user?.id || '',
+        createdByName: user?.name || '',
+        recurring: task.recurring || false,
+        recurringFrequency: task.recurringFrequency || undefined,
+      });
+
+      toast({
+        title: 'Task cloned',
+        description: 'Task has been cloned successfully',
+      });
+
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to clone task',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCloning(false);
+    }
+  };
+
   if (!task) return null;
 
   return (
@@ -428,30 +480,53 @@ export function TaskDetailsDialog({
                 </Select>
               )}
               {isAdmin && (
-                <Button
-                  variant={isEditing ? 'outline' : 'default'}
-                  size="default"
-                  className="h-10"
-                  onClick={() => {
-                    if (isEditing) {
-                      setIsEditing(false);
-                    } else {
-                      setIsEditing(true);
-                    }
-                  }}
-                >
-                  {isEditing ? (
-                    <>
-                      <X className="h-4 w-4 mr-2" />
-                      Cancel
-                    </>
-                  ) : (
-                    <>
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit
-                    </>
+                <>
+                  {!isEditing && (
+                    <Button
+                      variant="outline"
+                      size="default"
+                      className="h-10"
+                      onClick={handleClone}
+                      disabled={isCloning}
+                    >
+                      {isCloning ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Cloning...
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Clone Task
+                        </>
+                      )}
+                    </Button>
                   )}
-                </Button>
+                  <Button
+                    variant={isEditing ? 'outline' : 'default'}
+                    size="default"
+                    className="h-10"
+                    onClick={() => {
+                      if (isEditing) {
+                        setIsEditing(false);
+                      } else {
+                        setIsEditing(true);
+                      }
+                    }}
+                  >
+                    {isEditing ? (
+                      <>
+                        <X className="h-4 w-4 mr-2" />
+                        Cancel
+                      </>
+                    ) : (
+                      <>
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit
+                      </>
+                    )}
+                  </Button>
+                </>
               )}
             </div>
           </div>

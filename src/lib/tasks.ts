@@ -45,6 +45,7 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     createdByName: docData.createdByName || '',
     statusHistory: statusHistory.length > 0 ? statusHistory : undefined,
     recurring: docData.recurring || false,
+    recurringFrequency: docData.recurringFrequency || undefined,
     parentTaskId: docData.parentTaskId || undefined,
   };
 }
@@ -66,6 +67,7 @@ export async function createTask(taskData: {
   createdBy: string;
   createdByName: string;
   recurring?: boolean;
+  recurringFrequency?: string[];
   parentTaskId?: string;
 }): Promise<string> {
   if (!db) {
@@ -98,6 +100,7 @@ export async function createTask(taskData: {
       createdByName: taskData.createdByName,
       statusHistory: initialStatusHistory,
       recurring: taskData.recurring || false,
+      recurringFrequency: taskData.recurringFrequency || null,
       parentTaskId: taskData.parentTaskId || null,
     });
 
@@ -185,6 +188,7 @@ export async function updateTaskStatus(
             createdBy: options?.changedBy || currentData.createdBy,
             createdByName: options?.changedByName || currentData.createdByName,
             recurring: true, // Keep it as recurring
+            recurringFrequency: currentData.recurringFrequency || undefined,
             parentTaskId: parentId, // Link to the original recurring task
           };
 

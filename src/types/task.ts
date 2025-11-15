@@ -31,6 +31,7 @@ export interface Task {
   createdByName?: string; // Admin name for display
   statusHistory?: StatusChange[]; // History of status changes
   recurring?: boolean; // Whether this task should recur when completed
+  recurringFrequency?: string[]; // Array of day names (Monday, Tuesday, etc.) or ['all'] for all days
   parentTaskId?: string; // ID of the original recurring task (for tracking recurring instances)
 }
 
@@ -58,6 +59,7 @@ export interface FirestoreTask {
     changedByName?: string;
   }>;
   recurring?: boolean;
+  recurringFrequency?: string[]; // Array of day names or ['all'] for all days
   parentTaskId?: string;
 }
 

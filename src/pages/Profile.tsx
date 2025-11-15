@@ -53,45 +53,45 @@ import { getCompletedTasksByUser } from '@/lib/tasks'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 const FormSchema = z.object({
-  fullName: z.string().min(1, "Full name is required"),
-  preferredName: z.string().min(1, "Preferred name is required"),
-  email: z.string().email("Invalid email address"),
-  phone: z.string().min(1, "Phone number is required"),
+  fullName: z.string().optional(),
+  preferredName: z.string().optional(),
+  email: z.union([z.string().email("Invalid email address"), z.literal("")]).optional(),
+  phone: z.string().optional(),
   dob: z
     .string()
-    .min(1, "Date of birth is required")
-    .refine((val) => !isNaN(new Date(val).getTime()), "Invalid date format"),
-  jobRole: z.string().min(1, "Job role is required"),
-  workLocation: z.enum(["Sri Lanka", "Australia"]),
-  residentialAddress: z.string().min(1, "Residential address is required"),
-  postalCode: z.string().min(1, "Postal code is required"),
-  gender: z.enum(["Male", "Female", "Prefer not to say"]),
-  employeeType: z.enum(["Subcontractor", "Full-time", "Part-time", "Intern (Trainee)"]),
+    .optional()
+    .refine((val) => !val || !isNaN(new Date(val).getTime()), "Invalid date format"),
+  jobRole: z.string().optional(),
+  workLocation: z.enum(["Sri Lanka", "Australia"]).optional(),
+  residentialAddress: z.string().optional(),
+  postalCode: z.string().optional(),
+  gender: z.enum(["Male", "Female", "Prefer not to say"]).optional(),
+  employeeType: z.enum(["Subcontractor", "Full-time", "Part-time", "Intern (Trainee)"]).optional(),
   tfnAbn: z.string().optional(),
-  idNumber: z.string().min(1, "ID number is required"),
-  residingInAu: z.boolean(),
-  visaType: z.string(),
-  visaSubclass: z.string(),
+  idNumber: z.string().optional(),
+  residingInAu: z.boolean().optional(),
+  visaType: z.string().optional(),
+  visaSubclass: z.string().optional(),
   emergency: z.object({
-    fullName: z.string().min(1, "Emergency contact full name is required"),
-    relationship: z.string().min(1, "Relationship is required"),
-    phone: z.string().min(1, "Emergency contact phone is required"),
-  }),
-  declaration1: z.boolean().refine(val => val === true, "You must declare that the information is accurate and true."),
-  declaration2: z.boolean().refine(val => val === true, "You must consent to WE WILL AUSTRALIA storing and using your information."),
+    fullName: z.string().optional(),
+    relationship: z.string().optional(),
+    phone: z.string().optional(),
+  }).optional(),
+  declaration1: z.boolean().optional(),
+  declaration2: z.boolean().optional(),
 }).superRefine((data, ctx) => {
-  if (data.residingInAu) {
-    if (!data.visaType.trim()) {
+  if (data.residingInAu && data.residingInAu === true) {
+    if (data.visaType && !data.visaType.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Visa type is required",
+        message: "Visa type is required when residing in Australia",
         path: ["visaType"],
       });
     }
-    if (!data.visaSubclass.trim()) {
+    if (data.visaSubclass && !data.visaSubclass.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Visa subclass is required",
+        message: "Visa subclass is required when residing in Australia",
         path: ["visaSubclass"],
       });
     }
@@ -123,6 +123,7 @@ const Profile: React.FC = () => {
   const form = useForm<FormDataType>({
     resolver: zodResolver(FormSchema),
     mode: 'onChange',
+    criteriaMode: 'firstError',
     defaultValues: {
       fullName: '',
       preferredName: '',
@@ -440,18 +441,12 @@ const Profile: React.FC = () => {
 
   const onSubmit = async (values: FormDataType) => {
     if (!currentUser) {
-      toast({ variant: 'destructive', title: 'User not authenticated' })
+      toast({ 
+        variant: 'destructive', 
+        title: 'User not authenticated',
+        description: 'Please log in to save your profile.'
+      })
       return
-    }
-
-    // Check required uploads
-    const requiredUploads: UploadKey[] = ['idFrontPhoto', 'idBackPhoto', 'selfiePhoto']
-    for (const key of requiredUploads) {
-      const u = getUploadState(key)
-      if (!u.preview) {
-        toast({ variant: 'destructive', title: `Please upload ${key.replace(/([A-Z])/g, ' $1').trim().toLowerCase()}` })
-        return
-      }
     }
 
     setLoading(true)
@@ -476,11 +471,32 @@ const Profile: React.FC = () => {
       // Revoke old blob URLs
       oldPreviewsToRevoke.forEach(URL.revokeObjectURL)
 
+      // Helper function to remove empty strings and undefined values
+      const cleanData = (obj: any): any => {
+        const cleaned: any = {}
+        for (const [key, value] of Object.entries(obj)) {
+          if (value !== undefined && value !== null && value !== '') {
+            if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+              const cleanedNested = cleanData(value)
+              if (Object.keys(cleanedNested).length > 0) {
+                cleaned[key] = cleanedNested
+              }
+            } else {
+              cleaned[key] = value
+            }
+          }
+        }
+        return cleaned
+      }
+
       // Don't include email in the update - it should remain unchanged
       const { email, ...valuesWithoutEmail } = values
       
+      // Clean the form values to remove empty strings
+      const cleanedValues = cleanData(valuesWithoutEmail)
+      
       const fullData: FullDataType = {
-        ...valuesWithoutEmail,
+        ...cleanedValues,
         ...fileUrls,
         updatedAt: new Date().toISOString(),
       }
@@ -499,7 +515,7 @@ const Profile: React.FC = () => {
         fullData.email = currentUser.email
       }
 
-      await setDoc(doc(db, 'profiles', currentUser.uid), fullData)
+      await setDoc(doc(db, 'profiles', currentUser.uid), fullData, { merge: true })
 
       // Update local state
       Object.entries(fileUrls).forEach(([key, url]) => {
@@ -516,10 +532,17 @@ const Profile: React.FC = () => {
         visaNotice: { ...prev.visaNotice, file: null },
       }))
 
-      toast({ title: 'Profile updated successfully' })
+      toast({ 
+        title: 'Profile saved successfully', 
+        description: 'Your changes have been saved. You can continue editing and save again anytime.'
+      })
     } catch (error) {
       console.error('Error saving profile:', error)
-      toast({ variant: 'destructive', title: 'Error saving profile' })
+      toast({ 
+        variant: 'destructive', 
+        title: 'Error saving profile',
+        description: 'There was an error saving your profile. Please try again.'
+      })
     } finally {
       setLoading(false)
     }
@@ -841,36 +864,54 @@ const Profile: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dob">Date of Birth</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !dobDate && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {dobDate ? format(dobDate, "PPP") : <span>Pick a date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={dobDate}
-                        onSelect={(date) => {
-                          if (date) {
-                            setDobDate(date)
-                            form.setValue('dob', format(date, 'yyyy-MM-dd'))
+                  <div className="flex gap-2">
+                    <Input
+                      id="dob"
+                      type="date"
+                      {...form.register('dob', {
+                        onChange: (e) => {
+                          const dateValue = e.target.value
+                          if (dateValue) {
+                            const date = new Date(dateValue)
+                            if (!isNaN(date.getTime())) {
+                              setDobDate(date)
+                            }
+                          } else {
+                            setDobDate(undefined)
                           }
-                        }}
-                        initialFocus
-                        disabled={(date) =>
-                          date > new Date() || date < new Date('1900-01-01')
                         }
-                      />
-                    </PopoverContent>
-                  </Popover>
+                      })}
+                      className="flex-1"
+                    />
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                        >
+                          <CalendarIcon className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={dobDate}
+                          onSelect={(date) => {
+                            if (date) {
+                              setDobDate(date)
+                              form.setValue('dob', format(date, 'yyyy-MM-dd'), { shouldDirty: true })
+                            }
+                          }}
+                          initialFocus
+                          disabled={(date) =>
+                            date > new Date() || date < new Date('1900-01-01')
+                          }
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                   {form.formState.errors.dob && <p className="text-sm text-destructive">{form.formState.errors.dob.message}</p>}
                 </div>
                 <div className="space-y-2">
@@ -1147,7 +1188,7 @@ const Profile: React.FC = () => {
         </Tabs>
 
         <CardFooter className="flex justify-start">
-          <Button type="submit" disabled={loading || !form.formState.isValid}>
+          <Button type="submit" disabled={loading || !form.formState.isDirty}>
             {loading ? 'Saving...' : 'Save Profile'}
           </Button>
         </CardFooter>

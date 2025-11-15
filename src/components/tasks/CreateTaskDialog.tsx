@@ -46,6 +46,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     eta: undefined as Date | undefined,
     time: '09:00',
     recurring: false,
+    recurringFrequency: [] as string[], // Array of day names or ['all'] for all days
   });
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -209,6 +210,18 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         return user?.name || '';
       }).filter(Boolean);
 
+      // Validate recurring frequency if recurring is enabled
+      if (formData.recurring && formData.recurringFrequency.length === 0) {
+        toast({
+          title: 'Validation error',
+          description: 'Please select recurring frequency (All Days or specific days)',
+          variant: 'destructive',
+        });
+        setLoading(false);
+        setUploadingImages(false);
+        return;
+      }
+
       // Create task
       await createTask({
         taskId: formData.taskId.trim(),
@@ -224,6 +237,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         createdBy: user?.id || '',
         createdByName: user?.name || '',
         recurring: formData.recurring,
+        recurringFrequency: formData.recurring ? formData.recurringFrequency : undefined,
       });
 
       toast({
@@ -243,6 +257,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         eta: undefined,
         time: '09:00',
         recurring: false,
+        recurringFrequency: [],
       });
       setSelectedFiles([]);
       setImagePreviews([]);
@@ -388,7 +403,14 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
               <Label htmlFor="recurring">Recurring Task</Label>
               <Select
                 value={formData.recurring ? 'yes' : 'no'}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, recurring: value === 'yes' }))}
+                onValueChange={(value) => {
+                  const isRecurring = value === 'yes';
+                  setFormData(prev => ({ 
+                    ...prev, 
+                    recurring: isRecurring,
+                    recurringFrequency: isRecurring ? prev.recurringFrequency : []
+                  }));
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select option" />
@@ -406,6 +428,66 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
               )}
             </div>
           </div>
+
+          {formData.recurring && (
+            <div className="space-y-2">
+              <Label htmlFor="recurringFrequency">Recurring Frequency *</Label>
+              <Select
+                value={formData.recurringFrequency.includes('all') ? 'all' : formData.recurringFrequency.length > 0 ? 'custom' : 'custom'}
+                onValueChange={(value) => {
+                  if (value === 'all') {
+                    setFormData(prev => ({ ...prev, recurringFrequency: ['all'] }));
+                  } else {
+                    // When "Select Days" is chosen, keep existing selections or start with empty array
+                    setFormData(prev => ({ 
+                      ...prev, 
+                      recurringFrequency: prev.recurringFrequency.includes('all') ? [] : prev.recurringFrequency
+                    }));
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select frequency" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Days</SelectItem>
+                  <SelectItem value="custom">Select Days</SelectItem>
+                </SelectContent>
+              </Select>
+              {!formData.recurringFrequency.includes('all') && (
+                <div className="space-y-2 mt-2">
+                  <Label className="text-sm text-muted-foreground">Select specific days:</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                      <div key={day} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`day-${day}`}
+                          checked={formData.recurringFrequency.includes(day)}
+                          onCheckedChange={(checked) => {
+                            setFormData(prev => ({
+                              ...prev,
+                              recurringFrequency: checked
+                                ? [...prev.recurringFrequency, day]
+                                : prev.recurringFrequency.filter(d => d !== day)
+                            }));
+                          }}
+                        />
+                        <label
+                          htmlFor={`day-${day}`}
+                          className="text-sm font-medium leading-none cursor-pointer"
+                        >
+                          {day}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  {formData.recurringFrequency.length === 0 && (
+                    <p className="text-xs text-muted-foreground">Please select at least one day or choose 'All Days'</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Assign Members *</Label>
