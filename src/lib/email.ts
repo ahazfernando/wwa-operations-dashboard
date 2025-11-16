@@ -33,11 +33,23 @@ export async function sendClockInEmail({
       }),
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      const text = await response.text();
+      console.error('Failed to parse API response. Status:', response.status, 'Response:', text);
+      return { success: false, error: `API returned status ${response.status}: ${text}` };
+    }
 
     if (!response.ok) {
-      console.error('Failed to send email - API error:', data);
-      return { success: false, error: data.error || 'Failed to send email' };
+      console.error('Failed to send email - API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        data: data,
+        fullResponse: JSON.stringify(data, null, 2)
+      });
+      return { success: false, error: data?.error || data?.details || `API error: ${response.status} ${response.statusText}` };
     }
 
     console.log('Email sent successfully to:', adminEmail, data);

@@ -95,9 +95,20 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      console.error('Resend error:', JSON.stringify(error, null, 2));
+      console.error('Resend error details:', {
+        error: error,
+        errorType: typeof error,
+        errorString: JSON.stringify(error, null, 2),
+        errorMessage: error?.message,
+        errorName: error?.name,
+      });
       return NextResponse.json(
-        { error: 'Failed to send email', details: error },
+        { 
+          error: 'Failed to send email', 
+          details: error,
+          message: error?.message || 'Unknown Resend error',
+          name: error?.name || 'Error'
+        },
         { status: 500 }
       );
     }
