@@ -19,6 +19,7 @@ import { type DateRange } from 'react-day-picker';
 import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { sendClockInEmailsToAdmins } from '@/lib/email';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -322,6 +323,25 @@ const Clock = () => {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // Send email notifications to admin users
+      try {
+        const allUsers = await getAllUsers();
+        const adminUsers = allUsers.filter((u: any) => u.role === 'admin' && u.email);
+        const adminEmails = adminUsers.map((u: any) => u.email).filter(Boolean);
+        
+        if (adminEmails.length > 0) {
+          sendClockInEmailsToAdmins(
+            user.name || user.email,
+            user.email,
+            now,
+            adminEmails
+          );
+        }
+      } catch (emailError) {
+        // Don't fail the clock-in if email fails
+        console.error('Failed to send clock-in email notifications:', emailError);
+      }
 
       toast({
         title: 'Clocked In',
@@ -717,6 +737,25 @@ const Clock = () => {
           updatedAt: serverTimestamp(),
         });
 
+        // Send email notifications to admin users (excluding the admin who performed the action)
+        try {
+          const allUsers = await getAllUsers();
+          const adminUsers = allUsers.filter((u: any) => u.role === 'admin' && u.email && u.id !== user.id);
+          const adminEmails = adminUsers.map((u: any) => u.email).filter(Boolean);
+          
+          if (adminEmails.length > 0) {
+            sendClockInEmailsToAdmins(
+              selectedUserForClock.name,
+              selectedUserForClock.email,
+              now,
+              adminEmails
+            );
+          }
+        } catch (emailError) {
+          // Don't fail the clock-in if email fails
+          console.error('Failed to send clock-in email notifications:', emailError);
+        }
+
         toast({
           title: 'Success',
           description: `Clocked in ${selectedUserForClock.name} at ${format(now, 'h:mm a')}`,
@@ -881,6 +920,29 @@ const Clock = () => {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // Send email notifications to admin users (excluding the admin who performed the action)
+      try {
+        const allUsers = await getAllUsers();
+        const adminUsers = allUsers.filter((u: any) => u.role === 'admin' && u.email && u.id !== user.id);
+        const adminEmails = adminUsers.map((u: any) => u.email).filter(Boolean);
+        
+        // Get the clocked-in user's email
+        const clockedInUser = allUsers.find((u: any) => u.id === userId);
+        const clockedInUserEmail = clockedInUser?.email || '';
+        
+        if (adminEmails.length > 0) {
+          sendClockInEmailsToAdmins(
+            userName,
+            clockedInUserEmail,
+            now,
+            adminEmails
+          );
+        }
+      } catch (emailError) {
+        // Don't fail the clock-in if email fails
+        console.error('Failed to send clock-in email notifications:', emailError);
+      }
 
       toast({
         title: 'Success',
