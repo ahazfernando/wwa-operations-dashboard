@@ -76,7 +76,8 @@ export function TaskDetailsDialog({
     date: new Date(),
     assignedMembers: [] as string[],
     status: 'New' as TaskStatus,
-    kpi: '',
+    expectedKpi: '',
+    actualKpi: '',
     eta: undefined as Date | undefined,
     time: '09:00',
   });
@@ -96,7 +97,8 @@ export function TaskDetailsDialog({
         date: task.date,
         assignedMembers: task.assignedMembers,
         status: task.status,
-        kpi: task.kpi || '',
+        expectedKpi: task.expectedKpi || '',
+        actualKpi: task.actualKpi || '',
         eta: task.eta,
         time: task.time || '09:00',
       });
@@ -247,8 +249,23 @@ export function TaskDetailsDialog({
 
       // Upload new images with descriptions
       const uploadedImages: Array<{ url: string; description?: string }> = [];
+      const uploadErrors: string[] = [];
+      
       for (let i = 0; i < selectedFiles.length; i++) {
         try {
+          // Validate file type
+          const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+          if (!validImageTypes.includes(selectedFiles[i].type)) {
+            uploadErrors.push(`${selectedFiles[i].name}: Invalid file type`);
+            continue;
+          }
+
+          // Validate file size (max 5MB)
+          if (selectedFiles[i].size > 5 * 1024 * 1024) {
+            uploadErrors.push(`${selectedFiles[i].name}: File too large (max 5MB)`);
+            continue;
+          }
+
           const result = await uploadImageToCloudinary(selectedFiles[i]);
           const description = imageDescriptions[task.images.length + i]?.trim();
           uploadedImages.push({
@@ -257,7 +274,17 @@ export function TaskDetailsDialog({
           });
         } catch (error: any) {
           console.error('Error uploading image:', error);
+          uploadErrors.push(`${selectedFiles[i].name}: ${error.message || 'Upload failed'}`);
         }
+      }
+
+      // Show error messages if any uploads failed
+      if (uploadErrors.length > 0) {
+        toast({
+          title: 'Some images failed to upload',
+          description: uploadErrors.join(', '),
+          variant: 'destructive',
+        });
       }
 
       // Get assigned member names
@@ -284,7 +311,8 @@ export function TaskDetailsDialog({
         assignedMembers: formData.assignedMembers,
         assignedMemberNames,
         images: [...existingImages, ...uploadedImages],
-        kpi: formData.kpi.trim() || undefined,
+        expectedKpi: formData.expectedKpi.trim() || undefined,
+        actualKpi: formData.actualKpi.trim() || undefined,
         eta: formData.eta,
         time: formData.time || undefined,
       });
@@ -405,7 +433,8 @@ export function TaskDetailsDialog({
         assignedMembers: task.assignedMembers,
         assignedMemberNames,
         images: task.images, // Copy image URLs
-        kpi: task.kpi || undefined,
+        expectedKpi: task.expectedKpi || undefined,
+        actualKpi: task.actualKpi || undefined,
         eta: task.eta,
         time: task.time || undefined,
         createdBy: user?.id || '',
@@ -560,50 +589,64 @@ export function TaskDetailsDialog({
             )}
           </div>
 
-          {/* Due Date and KPI */}
+          {/* Due Date */}
+          <div className="space-y-2">
+            <Label>Due Date</Label>
+            {isEditing ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !formData.date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {formData.date ? format(formData.date, "PPP") : "Pick a date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={formData.date}
+                    onSelect={(date) => date && setFormData(prev => ({ ...prev, date }))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <CalendarIcon className="h-4 w-4" />
+                <span>{format(task.date, 'PPP')}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Expected KPI and Actual KPI */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Due Date</Label>
-              {isEditing ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !formData.date && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {formData.date ? format(formData.date, "PPP") : "Pick a date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={formData.date}
-                      onSelect={(date) => date && setFormData(prev => ({ ...prev, date }))}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <CalendarIcon className="h-4 w-4" />
-                  <span>{format(task.date, 'PPP')}</span>
-                </div>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Key Performance Indicator</Label>
+              <Label>Expected KPI</Label>
               {isEditing ? (
                 <Input
-                  value={formData.kpi}
-                  onChange={(e) => setFormData(prev => ({ ...prev, kpi: e.target.value }))}
+                  value={formData.expectedKpi}
+                  onChange={(e) => setFormData(prev => ({ ...prev, expectedKpi: e.target.value }))}
                   placeholder="e.g., 95% completion rate"
                 />
               ) : (
-                <p className="text-muted-foreground">{task.kpi || 'No KPI set'}</p>
+                <p className="text-muted-foreground">{task.expectedKpi || 'No Expected KPI set'}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Actual KPI</Label>
+              {isEditing ? (
+                <Input
+                  value={formData.actualKpi}
+                  onChange={(e) => setFormData(prev => ({ ...prev, actualKpi: e.target.value }))}
+                  placeholder="e.g., 92% completion rate"
+                />
+              ) : (
+                <p className="text-muted-foreground">{task.actualKpi || 'No Actual KPI set'}</p>
               )}
             </div>
           </div>
@@ -1069,7 +1112,8 @@ export function TaskDetailsDialog({
                       date: task.date,
                       assignedMembers: task.assignedMembers,
                       status: task.status,
-                      kpi: task.kpi || '',
+                      expectedKpi: task.expectedKpi || '',
+                      actualKpi: task.actualKpi || '',
                       eta: task.eta,
                       time: task.time || '09:00',
                     });

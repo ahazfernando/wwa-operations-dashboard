@@ -36,8 +36,20 @@ export async function uploadImageToCloudinary(
     );
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || 'Failed to upload image');
+      let errorMessage = 'Failed to upload image';
+      try {
+        const error = await response.json();
+        errorMessage = error.error?.message || error.message || errorMessage;
+      } catch (e) {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch (textError) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();
@@ -67,7 +79,13 @@ export async function uploadFileToCloudinary(
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'tasks_upload';
 
   if (!cloudName) {
-    throw new Error('Cloudinary cloud name is not configured');
+    console.error('Cloudinary configuration missing: NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME');
+    throw new Error('Cloudinary cloud name is not configured. Please check your environment variables.');
+  }
+
+  if (!uploadPreset) {
+    console.error('Cloudinary configuration missing: NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
+    throw new Error('Cloudinary upload preset is not configured. Please check your environment variables.');
   }
 
   const formData = new FormData();
@@ -86,8 +104,20 @@ export async function uploadFileToCloudinary(
     );
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || 'Failed to upload file');
+      let errorMessage = 'Failed to upload file';
+      try {
+        const error = await response.json();
+        errorMessage = error.error?.message || error.message || errorMessage;
+      } catch (e) {
+        // If response is not JSON, try to get text
+        try {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        } catch (textError) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();

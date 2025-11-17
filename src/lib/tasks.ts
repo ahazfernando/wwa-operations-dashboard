@@ -36,7 +36,8 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     assignedMembers: docData.assignedMembers || [],
     assignedMemberNames: docData.assignedMemberNames || [],
     images,
-    kpi: docData.kpi || '',
+    expectedKpi: docData.expectedKpi || '',
+    actualKpi: docData.actualKpi || '',
     eta: docData.eta?.toDate() || undefined,
     time: docData.time || '',
     createdAt: docData.createdAt?.toDate() || new Date(),
@@ -61,7 +62,8 @@ export async function createTask(taskData: {
   assignedMembers: string[];
   assignedMemberNames: string[];
   images: (string | TaskImage)[];
-  kpi?: string;
+  expectedKpi?: string;
+  actualKpi?: string;
   eta?: Date;
   time?: string;
   createdBy: string;
@@ -91,7 +93,8 @@ export async function createTask(taskData: {
       assignedMembers: taskData.assignedMembers,
       assignedMemberNames: taskData.assignedMemberNames,
       images: taskData.images,
-      kpi: taskData.kpi || '',
+      expectedKpi: taskData.expectedKpi || '',
+      actualKpi: taskData.actualKpi || '',
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
       time: taskData.time || '',
       createdAt: now,
@@ -182,7 +185,8 @@ export async function updateTaskStatus(
             assignedMembers: currentData.assignedMembers,
             assignedMemberNames: currentData.assignedMemberNames || [],
             images: [], // Start with no images for the new instance
-            kpi: currentData.kpi || '',
+            expectedKpi: currentData.expectedKpi || '',
+            actualKpi: currentData.actualKpi || '',
             eta: etaDate,
             time: currentData.time || '',
             createdBy: options?.changedBy || currentData.createdBy,
@@ -241,7 +245,8 @@ export async function updateTask(
     assignedMembers: string[];
     assignedMemberNames: string[];
     images: (string | TaskImage)[];
-    kpi?: string;
+    expectedKpi?: string;
+    actualKpi?: string;
     eta?: Date;
     time?: string;
   }
@@ -258,7 +263,8 @@ export async function updateTask(
       assignedMembers: taskData.assignedMembers,
       assignedMemberNames: taskData.assignedMemberNames,
       images: taskData.images,
-      kpi: taskData.kpi || '',
+      expectedKpi: taskData.expectedKpi || '',
+      actualKpi: taskData.actualKpi || '',
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
       time: taskData.time || '',
       updatedAt: Timestamp.now(),

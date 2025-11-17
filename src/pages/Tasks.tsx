@@ -14,7 +14,8 @@ import { TaskDetailsDialog } from '@/components/tasks/TaskDetailsDialog';
 import { getAllTasks, getTasksByUser, updateTaskStatus, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
 import { Task, TaskStatus } from '@/types/task';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Search, CalendarIcon, X, CheckCircle2, Download } from 'lucide-react';
+import { Plus, Search, CalendarIcon, X, CheckCircle2, Download, Users } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -49,10 +50,12 @@ const Tasks = () => {
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
   
   // Completed tasks filter states
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [completedDateRange, setCompletedDateRange] = useState<DateRange | undefined>();
+  const [completedSelectedEmployee, setCompletedSelectedEmployee] = useState<string>('all');
 
   const isAdmin = user?.role === 'admin';
 
@@ -150,9 +153,16 @@ const Tasks = () => {
     }
   };
 
-  // Filter tasks based on search query and date range
+  // Filter tasks based on search query, date range, and employee
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
+
+    // Filter by employee (only for admins)
+    if (isAdmin && selectedEmployee !== 'all') {
+      filtered = filtered.filter(task => 
+        task.assignedMembers.includes(selectedEmployee)
+      );
+    }
 
     // Filter by search query
     if (searchQuery.trim()) {
@@ -191,7 +201,7 @@ const Tasks = () => {
     }
 
     return filtered;
-  }, [tasks, searchQuery, dateRange]);
+  }, [tasks, searchQuery, dateRange, selectedEmployee, isAdmin]);
 
   const getTasksByStatus = (status: TaskStatus): Task[] => {
     if (status === 'Complete') {
@@ -308,6 +318,13 @@ const Tasks = () => {
     let filteredCompleted = [...completedTasks];
 
     // Apply the same filters as the display
+    // Filter by employee (only for admins)
+    if (isAdmin && completedSelectedEmployee !== 'all') {
+      filteredCompleted = filteredCompleted.filter(task => 
+        task.assignedMembers.includes(completedSelectedEmployee)
+      );
+    }
+
     if (completedSearchQuery.trim()) {
       const query = completedSearchQuery.toLowerCase();
       filteredCompleted = filteredCompleted.filter(task => 
@@ -428,9 +445,10 @@ const Tasks = () => {
   const clearFilters = () => {
     setSearchQuery('');
     setDateRange(undefined);
+    setSelectedEmployee('all');
   };
 
-  const hasActiveFilters = searchQuery.trim() !== '' || dateRange?.from || dateRange?.to;
+  const hasActiveFilters = searchQuery.trim() !== '' || dateRange?.from || dateRange?.to || (isAdmin && selectedEmployee !== 'all');
 
   return (
     <div className="space-y-6">
@@ -458,6 +476,26 @@ const Tasks = () => {
             className="pl-10"
           />
         </div>
+
+        {/* Employee Filter (Admin Only) */}
+        {isAdmin && (
+          <div className="relative w-full sm:w-[200px]">
+            <Users className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+            <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
+              <SelectTrigger className="w-full pl-10">
+                <SelectValue placeholder="Filter by employee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees</SelectItem>
+                {users.map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {user.name || user.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {/* Date Range Picker */}
         <Popover>
@@ -596,6 +634,26 @@ const Tasks = () => {
                 />
               </div>
 
+              {/* Employee Filter (Admin Only) */}
+              {isAdmin && (
+                <div className="relative w-full sm:w-[200px]">
+                  <Users className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+                  <Select value={completedSelectedEmployee} onValueChange={setCompletedSelectedEmployee}>
+                    <SelectTrigger className="w-full pl-10">
+                      <SelectValue placeholder="Filter by employee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Employees</SelectItem>
+                      {users.map((user) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.name || user.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {/* Date Range Picker */}
               <Popover>
                 <PopoverTrigger asChild>
@@ -646,13 +704,14 @@ const Tasks = () => {
               </Popover>
 
               {/* Clear Filters Button */}
-              {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to) && (
+              {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all')) && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
                     setCompletedSearchQuery('');
                     setCompletedDateRange(undefined);
+                    setCompletedSelectedEmployee('all');
                   }}
                   className="text-muted-foreground"
                 >
@@ -676,8 +735,15 @@ const Tasks = () => {
 
           {/* Filtered Completed Tasks */}
           {(() => {
-            // Filter completed tasks based on search and date range
+            // Filter completed tasks based on search, date range, and employee
             let filteredCompleted = [...completedTasks];
+
+            // Filter by employee (only for admins)
+            if (isAdmin && completedSelectedEmployee !== 'all') {
+              filteredCompleted = filteredCompleted.filter(task => 
+                task.assignedMembers.includes(completedSelectedEmployee)
+              );
+            }
 
             // Filter by search query
             if (completedSearchQuery.trim()) {
@@ -733,17 +799,18 @@ const Tasks = () => {
                   <div className="text-center py-8 text-muted-foreground">
                     <CheckCircle2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>
-                      {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to)
+                      {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all'))
                         ? 'No completed tasks found matching your filters'
                         : 'No completed tasks yet'}
                     </p>
-                    {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to) && (
+                    {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all')) && (
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => {
                           setCompletedSearchQuery('');
                           setCompletedDateRange(undefined);
+                          setCompletedSelectedEmployee('all');
                         }}
                         className="mt-4"
                       >

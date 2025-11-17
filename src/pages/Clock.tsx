@@ -160,22 +160,17 @@ const Clock = () => {
     if (!user) return;
 
     try {
-      // Use date string format to avoid composite index requirement
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const dateString = format(today, 'yyyy-MM-dd');
-
-      // Query by userId and dateString (no composite index needed)
+      // Query all entries for the user to find any active clock-in
+      // This ensures we find active entries even after midnight when the date changes
       const q = query(
         collection(db, 'timeEntries'),
-        where('userId', '==', user.id),
-        where('dateString', '==', dateString)
+        where('userId', '==', user.id)
       );
 
       const querySnapshot = await getDocs(q);
       
       // Find the active entry (clocked in but not clocked out)
-      // Since we can have multiple entries per day, we need to check all of them
+      // Check all entries regardless of date to handle clock-ins that span midnight
       let activeEntryDoc: { id: string; data: FirestoreTimeEntry } | null = null;
       for (const docSnapshot of querySnapshot.docs) {
         const entry = getTimeEntryData(docSnapshot.data());
@@ -283,17 +278,18 @@ const Clock = () => {
       today.setHours(0, 0, 0, 0);
 
       // Check if there's already an active entry (clocked in but not clocked out)
+      // Query all entries to handle clock-ins that span midnight
       const dateString = format(today, 'yyyy-MM-dd');
 
       const q = query(
         collection(db, 'timeEntries'),
-        where('userId', '==', user.id),
-        where('dateString', '==', dateString)
+        where('userId', '==', user.id)
       );
 
       const querySnapshot = await getDocs(q);
       
       // Check if user is already clocked in (has an entry with clockIn but no clockOut)
+      // Check all entries regardless of date to prevent duplicate clock-ins after midnight
       const activeEntry = querySnapshot.docs.find(doc => {
         try {
           const data = getTimeEntryData(doc.data());
@@ -701,10 +697,10 @@ const Clock = () => {
 
       if (action === 'in') {
         // Check if user is already clocked in
+        // Query all entries to handle clock-ins that span midnight
         const q = query(
           collection(db, 'timeEntries'),
-          where('userId', '==', selectedUserForClock.id),
-          where('dateString', '==', dateString)
+          where('userId', '==', selectedUserForClock.id)
         );
 
         const querySnapshot = await getDocs(q);
@@ -762,10 +758,10 @@ const Clock = () => {
         });
       } else {
         // Clock out - find active entry
+        // Query all entries to handle clock-ins that span midnight
         const q = query(
           collection(db, 'timeEntries'),
-          where('userId', '==', selectedUserForClock.id),
-          where('dateString', '==', dateString)
+          where('userId', '==', selectedUserForClock.id)
         );
 
         const querySnapshot = await getDocs(q);
@@ -885,10 +881,10 @@ const Clock = () => {
       const dateString = format(today, 'yyyy-MM-dd');
 
       // Check if user is already clocked in
+      // Query all entries to handle clock-ins that span midnight
       const q = query(
         collection(db, 'timeEntries'),
-        where('userId', '==', userId),
-        where('dateString', '==', dateString)
+        where('userId', '==', userId)
       );
 
       const querySnapshot = await getDocs(q);
@@ -974,10 +970,10 @@ const Clock = () => {
       const dateString = format(today, 'yyyy-MM-dd');
 
       // Find active entry
+      // Query all entries to handle clock-ins that span midnight
       const q = query(
         collection(db, 'timeEntries'),
-        where('userId', '==', userId),
-        where('dateString', '==', dateString)
+        where('userId', '==', userId)
       );
 
       const querySnapshot = await getDocs(q);
@@ -1160,14 +1156,10 @@ const Clock = () => {
     if (!user || user.role !== 'admin') return;
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const dateString = format(today, 'yyyy-MM-dd');
-
-      // Get all time entries for today
+      // Get all time entries to find active users regardless of date
+      // This ensures we show users who are still clocked in after midnight
       const q = query(
-        collection(db, 'timeEntries'),
-        where('dateString', '==', dateString)
+        collection(db, 'timeEntries')
       );
 
       const querySnapshot = await getDocs(q);

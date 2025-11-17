@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,8 +42,9 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     date: new Date(),
     assignedMembers: [] as string[],
     images: [] as string[],
-    kpi: '',
-    eta: undefined as Date | undefined,
+    expectedKpi: '',
+    actualKpi: '',
+    eta: new Date(),
     time: '09:00',
     recurring: false,
     recurringFrequency: [] as string[], // Array of day names or ['all'] for all days
@@ -53,6 +54,13 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
+
+  // Reset ETA to current date when dialog opens
+  useEffect(() => {
+    if (open) {
+      setFormData(prev => ({ ...prev, eta: new Date() }));
+    }
+  }, [open]);
 
   const validateAndAddFiles = (files: File[]) => {
     if (files.length === 0) return;
@@ -231,7 +239,8 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         assignedMembers: formData.assignedMembers,
         assignedMemberNames,
         images: uploadedImages,
-        kpi: formData.kpi.trim() || undefined,
+        expectedKpi: formData.expectedKpi.trim() || undefined,
+        actualKpi: formData.actualKpi.trim() || undefined,
         eta: formData.eta,
         time: formData.time || undefined,
         createdBy: user?.id || '',
@@ -253,8 +262,9 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         date: new Date(),
         assignedMembers: [],
         images: [],
-        kpi: '',
-        eta: undefined,
+        expectedKpi: '',
+        actualKpi: '',
+        eta: new Date(),
         time: '09:00',
         recurring: false,
         recurringFrequency: [],
@@ -354,14 +364,26 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="kpi">KPI</Label>
+              <Label htmlFor="expectedKpi">Expected KPI</Label>
               <Input
-                id="kpi"
+                id="expectedKpi"
                 placeholder="e.g., 95% completion rate"
-                value={formData.kpi}
-                onChange={(e) => setFormData(prev => ({ ...prev, kpi: e.target.value }))}
+                value={formData.expectedKpi}
+                onChange={(e) => setFormData(prev => ({ ...prev, expectedKpi: e.target.value }))}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="actualKpi">Actual KPI</Label>
+              <Input
+                id="actualKpi"
+                placeholder="e.g., 92% completion rate"
+                value={formData.actualKpi}
+                onChange={(e) => setFormData(prev => ({ ...prev, actualKpi: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="eta">ETA</Label>
               <Popover>
@@ -392,12 +414,17 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="time">Time</Label>
-              <Input
-                id="time"
-                type="time"
-                value={formData.time}
-                onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
-              />
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="time"
+                  type="text"
+                  placeholder="e.g., 09:00 AM"
+                  value={formData.time}
+                  onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
+                  className="pl-10"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="recurring">Recurring Task</Label>

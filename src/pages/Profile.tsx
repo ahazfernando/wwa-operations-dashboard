@@ -51,6 +51,8 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { getCompletedTasksByUser } from '@/lib/tasks'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { ImageCropDialog } from '@/components/ImageCropDialog'
+import { DragDropFileUpload } from '@/components/DragDropFileUpload'
 
 const FormSchema = z.object({
   fullName: z.string().optional(),
@@ -172,6 +174,8 @@ const Profile: React.FC = () => {
   })
   const [loadingMetrics, setLoadingMetrics] = useState(true)
   const { user: authUser } = useAuth()
+  const [cropDialogOpen, setCropDialogOpen] = useState(false)
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null)
 
   const fileInputRefs = useRef<Record<UploadKey, HTMLInputElement | null>>({
     profilePhoto: null,
@@ -421,18 +425,29 @@ const Profile: React.FC = () => {
     setUploads((prev) => ({ ...prev, [key]: { ...prev[key], preview } }))
   }
 
-  const uploadToCloudinary = async (file: File, resourceType: 'image' | 'raw'): Promise<string> => {
+  const uploadToCloudinary = async (file: File, resourceType: 'image' | 'raw', folder?: string): Promise<string> => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!)
+    
+    // Add folder if specified
+    if (folder) {
+      formData.append('folder', folder)
+    }
+
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+    if (!cloudName) {
+      throw new Error('Cloudinary cloud name is not configured')
+    }
 
     const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!}/${resourceType}/upload`,
+      `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
       { method: 'POST', body: formData }
     )
 
     if (!response.ok) {
-      throw new Error('Upload failed')
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error?.message || 'Upload failed')
     }
 
     const data = await response.json()
@@ -458,10 +473,27 @@ const Profile: React.FC = () => {
         const u = getUploadState(key)
         if (u.file) {
           const resourceType: 'image' | 'raw' = key === 'contractDoc' ? 'raw' : 'image'
-          const url = await uploadToCloudinary(u.file, resourceType)
-          fileUrls[key] = url
-          if (u.preview.startsWith('blob:')) {
-            oldPreviewsToRevoke.push(u.preview)
+          // Organize uploads by folder: profile photos go to 'profiles', documents to 'documents'
+          const folder = key === 'profilePhoto' 
+            ? `profiles/${currentUser.uid}` 
+            : key === 'contractDoc' 
+            ? `documents/${currentUser.uid}`
+            : `profiles/${currentUser.uid}/documents`
+          
+          try {
+            const url = await uploadToCloudinary(u.file, resourceType, folder)
+            fileUrls[key] = url
+            if (u.preview.startsWith('blob:')) {
+              oldPreviewsToRevoke.push(u.preview)
+            }
+          } catch (error) {
+            console.error(`Error uploading ${key}:`, error)
+            toast({
+              variant: 'destructive',
+              title: `Failed to upload ${key === 'profilePhoto' ? 'profile picture' : key}`,
+              description: error instanceof Error ? error.message : 'Upload failed. Please try again.',
+            })
+            // Continue with other uploads even if one fails
           }
         } else if (u.preview) {
           fileUrls[key] = u.preview
@@ -517,6 +549,9 @@ const Profile: React.FC = () => {
 
       await setDoc(doc(db, 'profiles', currentUser.uid), fullData, { merge: true })
 
+      // Check if profile photo was uploaded (before clearing the file)
+      const profilePhotoUploaded = fileUrls.profilePhoto && uploads.profilePhoto.file !== null
+
       // Update local state
       Object.entries(fileUrls).forEach(([key, url]) => {
         setUploadPreview(key as UploadKey, url)
@@ -531,10 +566,12 @@ const Profile: React.FC = () => {
         contractDoc: { ...prev.contractDoc, file: null },
         visaNotice: { ...prev.visaNotice, file: null },
       }))
-
+      
       toast({ 
         title: 'Profile saved successfully', 
-        description: 'Your changes have been saved. You can continue editing and save again anytime.'
+        description: profilePhotoUploaded 
+          ? 'Your profile picture has been uploaded to Cloudinary and saved. All changes have been saved.'
+          : 'Your changes have been saved. You can continue editing and save again anytime.'
       })
     } catch (error) {
       console.error('Error saving profile:', error)
@@ -709,10 +746,36 @@ const Profile: React.FC = () => {
                 onChange={(e) => {
                   const file = e.target.files?.[0]
                   if (file) {
-                    setUploadFile('profilePhoto', file)
+                    // Create a preview URL for cropping
+                    const reader = new FileReader()
+                    reader.onload = () => {
+                      setImageToCrop(reader.result as string)
+                      setCropDialogOpen(true)
+                    }
+                    reader.readAsDataURL(file)
                     e.target.value = ''
                   }
                 }}
+              />
+              <ImageCropDialog
+                open={cropDialogOpen}
+                onOpenChange={(open) => {
+                  setCropDialogOpen(open)
+                  if (!open) {
+                    // Clean up when dialog closes
+                    setImageToCrop(null)
+                  }
+                }}
+                imageSrc={imageToCrop || ''}
+                onCropComplete={(croppedFile) => {
+                  setUploadFile('profilePhoto', croppedFile)
+                  setImageToCrop(null)
+                  toast({
+                    title: 'Profile picture ready',
+                    description: 'Click "Save Profile" to save your changes.',
+                  })
+                }}
+                aspectRatio={1}
               />
             </div>
 
@@ -989,95 +1052,102 @@ const Profile: React.FC = () => {
                   {form.formState.errors.idNumber && <p className="text-sm text-destructive">{form.formState.errors.idNumber.message}</p>}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="id-front">Front photo of your Sri Lankan NIC / Driver license or Australian driver license</Label>
-                    <input
-                      id="id-front"
-                      ref={(el) => { fileInputRefs.current['idFrontPhoto'] = el }}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' } as React.CSSProperties}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) {
-                          setUploadFile('idFrontPhoto', file)
-                          e.target.value = ''
-                        }
-                      }}
-                    />
-                    {renderPreview('idFrontPhoto')}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="id-back">Back photo of your Sri Lankan NIC / driver license or Australian driver license</Label>
-                    <input
-                      id="id-back"
-                      ref={(el) => { fileInputRefs.current['idBackPhoto'] = el }}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' } as React.CSSProperties}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) {
-                          setUploadFile('idBackPhoto', file)
-                          e.target.value = ''
-                        }
-                      }}
-                    />
-                    {renderPreview('idBackPhoto')}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="selfie">Clear photo of yourself with a white background to use as the company ID</Label>
-                    <input
-                      id="selfie"
-                      ref={(el) => { fileInputRefs.current['selfiePhoto'] = el }}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' } as React.CSSProperties}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) {
-                          setUploadFile('selfiePhoto', file)
-                          e.target.value = ''
-                        }
-                      }}
-                    />
-                    {renderPreview('selfiePhoto')}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="passport">A photo of your passport detail page</Label>
-                    <input
-                      id="passport"
-                      ref={(el) => { fileInputRefs.current['passportPhoto'] = el }}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' } as React.CSSProperties}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) {
-                          setUploadFile('passportPhoto', file)
-                          e.target.value = ''
-                        }
-                      }}
-                    />
-                    {renderPreview('passportPhoto')}
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="contract">Contract Document (As PDF)</Label>
-                    <input
-                      id="contract"
-                      ref={(el) => { fileInputRefs.current['contractDoc'] = el }}
-                      type="file"
-                      accept=".pdf"
-                      style={{ display: 'none' } as React.CSSProperties}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
+                  <DragDropFileUpload
+                    label="Front photo of your Sri Lankan NIC / Driver license or Australian driver license"
+                    accept="image/*"
+                    maxSize={50}
+                    fileTypes="JPEG, PNG, JPG"
+                    value={uploads.idFrontPhoto.file}
+                    preview={uploads.idFrontPhoto.preview}
+                    onChange={(file) => {
+                      if (file) {
+                        setUploadFile('idFrontPhoto', file)
+                      } else {
+                        setUploads((prev) => ({
+                          ...prev,
+                          idFrontPhoto: { file: null, preview: '' },
+                        }))
+                      }
+                    }}
+                    disabled={loading}
+                  />
+                  <DragDropFileUpload
+                    label="Back photo of your Sri Lankan NIC / driver license or Australian driver license"
+                    accept="image/*"
+                    maxSize={50}
+                    fileTypes="JPEG, PNG, JPG"
+                    value={uploads.idBackPhoto.file}
+                    preview={uploads.idBackPhoto.preview}
+                    onChange={(file) => {
+                      if (file) {
+                        setUploadFile('idBackPhoto', file)
+                      } else {
+                        setUploads((prev) => ({
+                          ...prev,
+                          idBackPhoto: { file: null, preview: '' },
+                        }))
+                      }
+                    }}
+                    disabled={loading}
+                  />
+                  <DragDropFileUpload
+                    label="Clear photo of yourself with a white background to use as the company ID"
+                    accept="image/*"
+                    maxSize={50}
+                    fileTypes="JPEG, PNG, JPG"
+                    value={uploads.selfiePhoto.file}
+                    preview={uploads.selfiePhoto.preview}
+                    onChange={(file) => {
+                      if (file) {
+                        setUploadFile('selfiePhoto', file)
+                      } else {
+                        setUploads((prev) => ({
+                          ...prev,
+                          selfiePhoto: { file: null, preview: '' },
+                        }))
+                      }
+                    }}
+                    disabled={loading}
+                  />
+                  <DragDropFileUpload
+                    label="A photo of your passport detail page"
+                    accept="image/*"
+                    maxSize={50}
+                    fileTypes="JPEG, PNG, JPG"
+                    value={uploads.passportPhoto.file}
+                    preview={uploads.passportPhoto.preview}
+                    onChange={(file) => {
+                      if (file) {
+                        setUploadFile('passportPhoto', file)
+                      } else {
+                        setUploads((prev) => ({
+                          ...prev,
+                          passportPhoto: { file: null, preview: '' },
+                        }))
+                      }
+                    }}
+                    disabled={loading}
+                  />
+                  <div className="md:col-span-2">
+                    <DragDropFileUpload
+                      label="Contract Document (As PDF)"
+                      accept=".pdf,application/pdf"
+                      maxSize={50}
+                      fileTypes="PDF"
+                      value={uploads.contractDoc.file}
+                      preview={uploads.contractDoc.preview}
+                      onChange={(file) => {
                         if (file) {
                           setUploadFile('contractDoc', file)
-                          e.target.value = ''
+                        } else {
+                          setUploads((prev) => ({
+                            ...prev,
+                            contractDoc: { file: null, preview: '' },
+                          }))
                         }
                       }}
+                      disabled={loading}
                     />
-                    {renderPreview('contractDoc')}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1102,24 +1172,25 @@ const Profile: React.FC = () => {
                       <Input id="visaSubclass" {...form.register('visaSubclass')} />
                       {form.formState.errors.visaSubclass && <p className="text-sm text-destructive">{form.formState.errors.visaSubclass.message}</p>}
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="visa-notice">A copy of your visa grant notice (Image)</Label>
-                      <input
-                        id="visa-notice"
-                        ref={(el) => { fileInputRefs.current['visaNotice'] = el }}
-                        type="file"
-                        accept="image/*"
-                        style={{ display: 'none' } as React.CSSProperties}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0]
-                          if (file) {
-                            setUploadFile('visaNotice', file)
-                            e.target.value = ''
-                          }
-                        }}
-                      />
-                      {renderPreview('visaNotice')}
-                    </div>
+                    <DragDropFileUpload
+                      label="A copy of your visa grant notice (Image)"
+                      accept="image/*"
+                      maxSize={50}
+                      fileTypes="JPEG, PNG, JPG"
+                      value={uploads.visaNotice.file}
+                      preview={uploads.visaNotice.preview}
+                      onChange={(file) => {
+                        if (file) {
+                          setUploadFile('visaNotice', file)
+                        } else {
+                          setUploads((prev) => ({
+                            ...prev,
+                            visaNotice: { file: null, preview: '' },
+                          }))
+                        }
+                      }}
+                      disabled={loading}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -1188,7 +1259,10 @@ const Profile: React.FC = () => {
         </Tabs>
 
         <CardFooter className="flex justify-start">
-          <Button type="submit" disabled={loading || !form.formState.isDirty}>
+          <Button 
+            type="submit" 
+            disabled={loading || (!form.formState.isDirty && !uploadKeys.some(key => uploads[key].file !== null))}
+          >
             {loading ? 'Saving...' : 'Save Profile'}
           </Button>
         </CardFooter>

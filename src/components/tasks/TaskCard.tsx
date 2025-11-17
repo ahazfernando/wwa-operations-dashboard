@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Task, TaskStatus, TaskImage } from '@/types/task';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +32,7 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAssigned = user && task.assignedMembers.includes(user.id);
 
@@ -77,6 +78,35 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       return;
     }
 
+    // Validate file type
+    const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validImageTypes.includes(file.type)) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload an image file (JPEG, PNG, GIF, or WebP)',
+        variant: 'destructive',
+      });
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload an image smaller than 5MB',
+        variant: 'destructive',
+      });
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
     try {
       setIsUploading(true);
       const result = await uploadImageToCloudinary(file);
@@ -88,13 +118,18 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       });
       onStatusChange?.();
     } catch (error: any) {
+      console.error('Image upload error:', error);
       toast({
         title: 'Upload failed',
-        description: error.message || 'Failed to upload image',
+        description: error.message || 'Failed to upload image. Please check your Cloudinary configuration.',
         variant: 'destructive',
       });
     } finally {
       setIsUploading(false);
+      // Reset file input after upload attempt
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -238,12 +273,22 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
 
           {(isAssigned || canEdit) && (
             <div className="pt-2 border-t" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                <Camera className="h-4 w-4" />
-                <span>Add Image</span>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="h-4 w-4" />
+                    <span>Add Image</span>
+                  </>
+                )}
                 <input
+                  ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];

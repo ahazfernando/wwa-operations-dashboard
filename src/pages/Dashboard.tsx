@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight } from 'lucide-react';
 import { getTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
@@ -12,18 +13,42 @@ import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ActiveUsersSection } from '@/components/ActiveUsersSection';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const Dashboard = () => {
   const { user } = useAuth();
   const router = useRouter();
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [loadingPhoto, setLoadingPhoto] = useState(true);
 
   useEffect(() => {
     if (user) {
       loadAssignedTasks();
+      loadProfilePhoto();
     }
   }, [user]);
+
+  const loadProfilePhoto = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingPhoto(true);
+      const profileDoc = await getDoc(doc(db, 'profiles', user.id));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        if (data.profilePhoto) {
+          setProfilePhoto(data.profilePhoto);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading profile photo:', error);
+    } finally {
+      setLoadingPhoto(false);
+    }
+  };
 
   const loadAssignedTasks = async () => {
     if (!user) return;
@@ -61,11 +86,32 @@ const Dashboard = () => {
     }
   };
 
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}</h1>
-        <p className="text-muted-foreground mt-1">We Will Australia Operations Dashboard</p>
+      <div className="flex items-center gap-4">
+        {loadingPhoto ? (
+          <Skeleton className="h-16 w-16 rounded-full" />
+        ) : (
+          <Avatar className="h-16 w-16">
+            <AvatarImage src={profilePhoto || undefined} alt={user?.name || 'User'} />
+            <AvatarFallback className="text-lg font-semibold">
+              {user?.name ? getInitials(user.name) : 'U'}
+            </AvatarFallback>
+          </Avatar>
+        )}
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}</h1>
+          <p className="text-muted-foreground mt-1">We Will Australia Operations Dashboard</p>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
