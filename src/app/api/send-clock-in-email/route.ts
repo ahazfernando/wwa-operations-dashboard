@@ -95,19 +95,43 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
+      // Safely serialize error object
+      let errorDetails: any = {};
+      try {
+        if (typeof error === 'object' && error !== null) {
+          errorDetails = {
+            message: error?.message || String(error),
+            name: error?.name || 'Error',
+            ...(error?.statusCode && { statusCode: error.statusCode }),
+            ...(error?.code && { code: error.code }),
+          };
+          
+          // Try to stringify the full error for logging
+          try {
+            errorDetails.fullError = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+          } catch (e) {
+            errorDetails.fullError = String(error);
+          }
+        } else {
+          errorDetails = { message: String(error) };
+        }
+      } catch (e) {
+        errorDetails = { message: 'Failed to serialize error', originalError: String(error) };
+      }
+      
       console.error('Resend error details:', {
         error: error,
         errorType: typeof error,
-        errorString: JSON.stringify(error, null, 2),
+        errorDetails: errorDetails,
         errorMessage: error?.message,
         errorName: error?.name,
       });
+      
       return NextResponse.json(
         { 
           error: 'Failed to send email', 
-          details: error,
-          message: error?.message || 'Unknown Resend error',
-          name: error?.name || 'Error'
+          message: errorDetails.message || 'Unknown Resend error',
+          details: errorDetails
         },
         { status: 500 }
       );
@@ -116,19 +140,46 @@ export async function POST(request: NextRequest) {
     console.log('Email sent successfully via Resend:', data);
     return NextResponse.json({ success: true, data });
   } catch (error: any) {
+    // Safely extract error information
+    let errorMessage = 'Unknown error';
+    let errorDetails: any = {};
+    
+    try {
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else {
+        errorMessage = String(error);
+      }
+      
+      errorDetails = {
+        message: errorMessage,
+        name: error?.name || 'Error',
+        ...(error?.stack && { stack: error.stack }),
+        ...(error?.cause && { cause: String(error.cause) }),
+      };
+    } catch (e) {
+      errorMessage = 'Failed to extract error information';
+      errorDetails = { originalError: String(error) };
+    }
+    
     console.error('Email API catch block - Full error:', {
       error: error,
+      errorMessage: errorMessage,
+      errorDetails: errorDetails,
       message: error?.message,
       stack: error?.stack,
       name: error?.name,
       cause: error?.cause,
       toString: String(error)
     });
+    
     return NextResponse.json(
       { 
         error: 'Internal server error', 
-        message: error?.message || 'Unknown error',
-        details: error?.stack || String(error)
+        message: errorMessage,
+        details: errorDetails
       },
       { status: 500 }
     );

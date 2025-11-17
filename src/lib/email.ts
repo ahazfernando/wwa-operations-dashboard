@@ -60,14 +60,37 @@ export async function sendClockInEmail({
     }
 
     if (!response.ok) {
-      const errorMessage = data?.error || data?.message || data?.details || `HTTP ${response.status}: ${response.statusText}`;
-      console.error('Failed to send email - Full error details:', {
+      // Extract error message with better fallback handling
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      
+      if (data) {
+        if (typeof data === 'string') {
+          errorMessage = data;
+        } else if (typeof data === 'object') {
+          errorMessage = data.error || data.message || data.details || errorMessage;
+        }
+      }
+      
+      // Log detailed error information
+      const errorDetails: any = {
         status: response.status,
         statusText: response.statusText,
-        data: data,
         errorMessage: errorMessage,
-        fullResponse: JSON.stringify(data, null, 2)
-      });
+      };
+      
+      if (data) {
+        errorDetails.data = data;
+        try {
+          errorDetails.dataString = JSON.stringify(data, null, 2);
+        } catch (e) {
+          errorDetails.dataString = String(data);
+        }
+      } else {
+        errorDetails.data = null;
+        errorDetails.note = 'No response data received';
+      }
+      
+      console.error('Failed to send email - Full error details:', errorDetails);
       return { success: false, error: errorMessage };
     }
 
@@ -109,13 +132,18 @@ export async function sendClockInEmailsToAdmins(
       adminEmail,
     }).then((result) => {
       if (!result.success) {
-        console.error(`Failed to send email to ${adminEmail}:`, result.error);
+        console.error(`Failed to send email to ${adminEmail}:`, result.error || 'Unknown error');
       }
       return result;
     }).catch((error) => {
-      console.error(`Error sending email to ${adminEmail}:`, error);
+      const errorMessage = error?.message || error?.toString() || 'Unknown error';
+      console.error(`Error sending email to ${adminEmail}:`, {
+        error: errorMessage,
+        errorObject: error,
+        stack: error?.stack
+      });
       // Don't throw - we want to try sending to all admins even if one fails
-      return { success: false, error: error.message };
+      return { success: false, error: errorMessage };
     })
   );
 
