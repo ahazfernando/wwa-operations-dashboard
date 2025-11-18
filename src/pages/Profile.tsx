@@ -493,9 +493,17 @@ const Profile: React.FC = () => {
               title: `Failed to upload ${key === 'profilePhoto' ? 'profile picture' : key}`,
               description: error instanceof Error ? error.message : 'Upload failed. Please try again.',
             })
-            // Continue with other uploads even if one fails
+            // If upload fails, preserve existing saved URL if it's HTTP/HTTPS
+            // Don't save blob URLs - they're temporary and won't persist
+            // The file will remain in state so user can try uploading again
+            if (u.preview && (u.preview.startsWith('http://') || u.preview.startsWith('https://'))) {
+              fileUrls[key] = u.preview
+            }
+            continue
           }
-        } else if (u.preview) {
+        } else if (u.preview && (u.preview.startsWith('http://') || u.preview.startsWith('https://'))) {
+          // Only save HTTP/HTTPS URLs (Cloudinary URLs), not blob URLs
+          // Blob URLs are temporary and will break after page reload
           fileUrls[key] = u.preview
         }
       }
@@ -527,6 +535,22 @@ const Profile: React.FC = () => {
       // Clean the form values to remove empty strings
       const cleanedValues = cleanData(valuesWithoutEmail)
       
+      // Get existing profile data to preserve file URLs if uploads fail
+      const existingProfile = await getDoc(doc(db, 'profiles', currentUser.uid))
+      const existingData = existingProfile.exists() ? (existingProfile.data() as Partial<FullDataType>) : null
+      
+      // For any upload keys that don't have a URL (upload failed or no file),
+      // preserve the existing saved URL if it exists
+      uploadKeys.forEach((key) => {
+        if (!fileUrls[key] && existingData?.[key] && typeof existingData[key] === 'string') {
+          const existingUrl = existingData[key] as string
+          // Only preserve HTTP/HTTPS URLs, not blob URLs
+          if (existingUrl.startsWith('http://') || existingUrl.startsWith('https://')) {
+            fileUrls[key] = existingUrl
+          }
+        }
+      })
+      
       const fullData: FullDataType = {
         ...cleanedValues,
         ...fileUrls,
@@ -535,9 +559,7 @@ const Profile: React.FC = () => {
 
       // Only update email if it doesn't exist in the profile yet (for migration purposes)
       // Otherwise, preserve the existing email or use the Firebase Auth email
-      const existingProfile = await getDoc(doc(db, 'profiles', currentUser.uid))
-      if (existingProfile.exists()) {
-        const existingData = existingProfile.data()
+      if (existingData) {
         if (existingData.email) {
           fullData.email = existingData.email
         } else if (currentUser.email) {
@@ -552,20 +574,24 @@ const Profile: React.FC = () => {
       // Check if profile photo was uploaded (before clearing the file)
       const profilePhotoUploaded = fileUrls.profilePhoto && uploads.profilePhoto.file !== null
 
-      // Update local state
+      // Update local state - only update previews for successfully uploaded files
       Object.entries(fileUrls).forEach(([key, url]) => {
         setUploadPreview(key as UploadKey, url)
       })
 
-      setUploads((prev) => ({
-        profilePhoto: { ...prev.profilePhoto, file: null },
-        idFrontPhoto: { ...prev.idFrontPhoto, file: null },
-        idBackPhoto: { ...prev.idBackPhoto, file: null },
-        selfiePhoto: { ...prev.selfiePhoto, file: null },
-        passportPhoto: { ...prev.passportPhoto, file: null },
-        contractDoc: { ...prev.contractDoc, file: null },
-        visaNotice: { ...prev.visaNotice, file: null },
-      }))
+      // Only clear files that were successfully uploaded (exist in fileUrls)
+      // Keep files that failed to upload so user can try again
+      setUploads((prev) => {
+        const updated = { ...prev }
+        uploadKeys.forEach((key) => {
+          if (fileUrls[key]) {
+            // File was successfully uploaded or has a valid saved URL
+            updated[key] = { ...prev[key], file: null }
+          }
+          // If fileUrls[key] doesn't exist, keep the file in state
+        })
+        return updated
+      })
       
       toast({ 
         title: 'Profile saved successfully', 
