@@ -6,21 +6,17 @@ import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import LeaveManagement from '../components/availability/Leavemanagement'
 import AvailabilityTable from '../components/availability/AvailabilityTable'
-import { useAuth } from '@/contexts/AuthContext' // Adjust path as needed
+import { useAuth } from '@/contexts/AuthContext'
+import AdminLeave from '@/components/availability/AdminLeave'
 
 const Availability = () => {
-    // Use the custom auth hook to get user with role
     const { user, isLoading } = useAuth()
-
-    // Move all hooks to the top level, before any early returns
     const [open, setOpen] = useState(false)
 
-    // Handle loading state
     if (isLoading) {
-        return <div>Loading...</div> // Or a spinner component
+        return <div>Loading...</div> 
     }
 
-    // Shared utils (these are not hooks, so can be after)
     const formatTime = (date: Date) => format(date, 'h:mm a').replace(/:/g, '.').replace(/\s/g, '').toUpperCase()
     const timeSlots = (() => {
         const slots: string[] = []
@@ -38,9 +34,9 @@ const Availability = () => {
         <div className="space-y-6">
             <div className="flex justify-between items-start">
                 <div>
-                    <h1 className="text-3xl font-bold text-foreground">Check Availability</h1>
+                    <h1 className="text-3xl font-bold text-foreground">Availability Management</h1>
                     <p className="text-muted-foreground mt-1">
-                        Manage Your Work Availability
+                        Manage leaves and work availability
                     </p>
                 </div>
                 {user?.role === 'admin' && (
@@ -48,11 +44,11 @@ const Availability = () => {
                         <DialogTrigger asChild>
                             <Button>
                                 <Plus className="h-4 w-4 mr-2" />
-                                Add Your Availability
+                                Set Your Availability
                             </Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-7xl h-[90vh] overflow-y-auto">
-                            <DialogTitle>Add Your Availability</DialogTitle>
+                            <DialogTitle>Set My Availability</DialogTitle>
                             <LeaveManagement timeSlots={timeSlots} />
                             <AvailabilityTable timeSlots={timeSlots} />
                         </DialogContent>
@@ -63,6 +59,11 @@ const Availability = () => {
                 <>
                     <LeaveManagement timeSlots={timeSlots} />
                     <AvailabilityTable timeSlots={timeSlots} />
+                </>
+            )}
+            {user?.role === 'admin' && (
+                <>
+                    <AdminLeave />
                 </>
             )}
         </div>
