@@ -7,8 +7,20 @@ export interface StatusChange {
   changedByName?: string; // User name for display
 }
 
+export interface CompletedBy {
+  userId: string;
+  userName: string;
+  completedAt: Date;
+}
+
 export interface TaskImage {
   url: string;
+  description?: string;
+}
+
+export interface TaskFile {
+  url: string;
+  name: string;
   description?: string;
 }
 
@@ -22,6 +34,7 @@ export interface Task {
   assignedMembers: string[]; // Array of user IDs
   assignedMemberNames?: string[]; // Array of user names for display
   images: (string | TaskImage)[]; // Array of Cloudinary image URLs or objects with url and description
+  files?: (string | TaskFile)[]; // Array of Cloudinary file URLs or objects with url, name and description
   expectedKpi?: string; // Expected Key Performance Indicator
   actualKpi?: string; // Actual Key Performance Indicator
   eta?: Date; // Estimated Time of Arrival / Estimated Completion Date
@@ -34,6 +47,8 @@ export interface Task {
   recurring?: boolean; // Whether this task should recur when completed
   recurringFrequency?: string[]; // Array of day names (Monday, Tuesday, etc.) or ['all'] for all days
   parentTaskId?: string; // ID of the original recurring task (for tracking recurring instances)
+  collaborative?: boolean; // Whether this is a collaborative task requiring all members to complete
+  completedBy?: CompletedBy[]; // Array of users who have completed this collaborative task
 }
 
 export interface FirestoreTask {
@@ -46,6 +61,7 @@ export interface FirestoreTask {
   assignedMembers: string[];
   assignedMemberNames?: string[];
   images: (string | { url: string; description?: string })[];
+  files?: (string | { url: string; name: string; description?: string })[];
   expectedKpi?: string;
   actualKpi?: string;
   eta?: any; // Firestore Timestamp
@@ -63,5 +79,11 @@ export interface FirestoreTask {
   recurring?: boolean;
   recurringFrequency?: string[]; // Array of day names or ['all'] for all days
   parentTaskId?: string;
+  collaborative?: boolean;
+  completedBy?: Array<{
+    userId: string;
+    userName: string;
+    completedAt: any; // Firestore Timestamp
+  }>;
 }
 

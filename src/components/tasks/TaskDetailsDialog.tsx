@@ -30,13 +30,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { updateTask, updateTaskStatus, updateTaskImages, deleteTask, createTask } from '@/lib/tasks';
-import { uploadImageToCloudinary } from '@/lib/cloudinary';
+import { updateTask, updateTaskStatus, updateTaskImages, updateTaskFiles, deleteTask, createTask } from '@/lib/tasks';
+import { uploadImageToCloudinary, uploadFileToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search, Copy } from 'lucide-react';
+import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search, Copy, FileText } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 interface User {
   id: string;
@@ -68,6 +69,8 @@ export function TaskDetailsDialog({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isCloning, setIsCloning] = useState(false);
+  const [isEditingActualKpi, setIsEditingActualKpi] = useState(false);
+  const [isSavingActualKpi, setIsSavingActualKpi] = useState(false);
 
   const [formData, setFormData] = useState({
     taskId: '',
@@ -82,10 +85,13 @@ export function TaskDetailsDialog({
     time: '09:00',
   });
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedImageFiles, setSelectedImageFiles] = useState<File[]>([]);
+  const [selectedDocumentFiles, setSelectedDocumentFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [imageDescriptions, setImageDescriptions] = useState<{ [key: number]: string }>({});
+  const [fileDescriptions, setFileDescriptions] = useState<{ [key: number]: string }>({});
   const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
 
   useEffect(() => {
@@ -103,21 +109,33 @@ export function TaskDetailsDialog({
         time: task.time || '09:00',
       });
       setImagePreviews([]);
-      setSelectedFiles([]);
+      setSelectedImageFiles([]);
+      setSelectedDocumentFiles([]);
       // Initialize image descriptions from existing images
-      const descriptions: { [key: number]: string } = {};
+      const imgDescriptions: { [key: number]: string } = {};
       task.images.forEach((img, index) => {
         if (typeof img === 'object' && img.description) {
-          descriptions[index] = img.description;
+          imgDescriptions[index] = img.description;
         }
       });
-      setImageDescriptions(descriptions);
+      setImageDescriptions(imgDescriptions);
+      // Initialize file descriptions from existing files
+      const fileDesc: { [key: number]: string } = {};
+      if (task.files) {
+        task.files.forEach((file, index) => {
+          if (typeof file === 'object' && file.description) {
+            fileDesc[index] = file.description;
+          }
+        });
+      }
+      setFileDescriptions(fileDesc);
       setIsEditing(false);
+      setIsEditingActualKpi(false);
       setMemberSearchQuery('');
     }
   }, [task]);
 
-  const validateAndAddFiles = (files: File[]) => {
+  const validateAndAddImages = (files: File[]) => {
     if (files.length === 0) return;
 
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
@@ -143,17 +161,17 @@ export function TaskDetailsDialog({
     }
 
     // Check total file limit (max 2 files)
-    const totalFiles = selectedFiles.length + files.length;
+    const totalFiles = selectedImageFiles.length + files.length;
     if (totalFiles > 2) {
       toast({
         title: 'Too many files',
-        description: 'Maximum 2 files allowed',
+        description: 'Maximum 2 image files allowed',
         variant: 'destructive',
       });
       return;
     }
 
-    setSelectedFiles(prev => [...prev, ...files]);
+    setSelectedImageFiles(prev => [...prev, ...files]);
 
     files.forEach(file => {
       const reader = new FileReader();
@@ -164,9 +182,53 @@ export function TaskDetailsDialog({
     });
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const validateAndAddDocumentFiles = (files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['application/pdf'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only PDF files',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check total file limit (max 2 files)
+    const totalFiles = selectedDocumentFiles.length + files.length;
+    if (totalFiles > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 document files allowed',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSelectedDocumentFiles(prev => [...prev, ...files]);
+  };
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    validateAndAddFiles(files);
+    validateAndAddImages(files);
+  };
+
+  const handleDocumentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    validateAndAddDocumentFiles(files);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -187,17 +249,47 @@ export function TaskDetailsDialog({
     setIsDragging(false);
 
     const files = Array.from(e.dataTransfer.files);
-    validateAndAddFiles(files);
+    validateAndAddImages(files);
+  };
+
+  const handleDragOverFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(true);
+  };
+
+  const handleDragLeaveFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+  };
+
+  const handleDropFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    validateAndAddDocumentFiles(files);
   };
 
   const removeImage = (index: number) => {
     if (!task) return;
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    setSelectedImageFiles(prev => prev.filter((_, i) => i !== index));
     // Remove description for this image
     const newDescriptions = { ...imageDescriptions };
     delete newDescriptions[index];
     setImageDescriptions(newDescriptions);
+  };
+
+  const removeDocumentFile = (index: number) => {
+    if (!task) return;
+    setSelectedDocumentFiles(prev => prev.filter((_, i) => i !== index));
+    // Remove description for this file
+    const newDescriptions = { ...fileDescriptions };
+    delete newDescriptions[index];
+    setFileDescriptions(newDescriptions);
   };
 
   const removeExistingImage = async (index: number) => {
@@ -249,40 +341,60 @@ export function TaskDetailsDialog({
 
       // Upload new images with descriptions
       const uploadedImages: Array<{ url: string; description?: string }> = [];
-      const uploadErrors: string[] = [];
+      const imageUploadErrors: string[] = [];
       
-      for (let i = 0; i < selectedFiles.length; i++) {
+      for (let i = 0; i < selectedImageFiles.length; i++) {
         try {
-          // Validate file type
-          const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-          if (!validImageTypes.includes(selectedFiles[i].type)) {
-            uploadErrors.push(`${selectedFiles[i].name}: Invalid file type`);
-            continue;
-          }
-
-          // Validate file size (max 5MB)
-          if (selectedFiles[i].size > 5 * 1024 * 1024) {
-            uploadErrors.push(`${selectedFiles[i].name}: File too large (max 5MB)`);
-            continue;
-          }
-
-          const result = await uploadImageToCloudinary(selectedFiles[i]);
+          const result = await uploadImageToCloudinary(selectedImageFiles[i]);
           const description = imageDescriptions[task.images.length + i]?.trim();
-          uploadedImages.push({
-            url: result.url,
-            description: description || undefined,
-          });
+          // Only include description if it's not empty
+          const imageObj: { url: string; description?: string } = { url: result.url };
+          if (description && description.length > 0) {
+            imageObj.description = description;
+          }
+          uploadedImages.push(imageObj);
         } catch (error: any) {
           console.error('Error uploading image:', error);
-          uploadErrors.push(`${selectedFiles[i].name}: ${error.message || 'Upload failed'}`);
+          imageUploadErrors.push(`${selectedImageFiles[i].name}: ${error.message || 'Upload failed'}`);
+        }
+      }
+
+      // Upload new document files with descriptions
+      const uploadedFiles: Array<{ url: string; name: string; description?: string }> = [];
+      const fileUploadErrors: string[] = [];
+      
+      for (let i = 0; i < selectedDocumentFiles.length; i++) {
+        try {
+          const result = await uploadFileToCloudinary(selectedDocumentFiles[i]);
+          const fileIndex = (task.files?.length || 0) + i;
+          const description = fileDescriptions[fileIndex]?.trim();
+          // Only include description if it's not empty
+          const fileObj: { url: string; name: string; description?: string } = { 
+            url: result.url, 
+            name: selectedDocumentFiles[i].name 
+          };
+          if (description && description.length > 0) {
+            fileObj.description = description;
+          }
+          uploadedFiles.push(fileObj);
+        } catch (error: any) {
+          console.error('Error uploading file:', error);
+          fileUploadErrors.push(`${selectedDocumentFiles[i].name}: ${error.message || 'Upload failed'}`);
         }
       }
 
       // Show error messages if any uploads failed
-      if (uploadErrors.length > 0) {
+      if (imageUploadErrors.length > 0) {
         toast({
           title: 'Some images failed to upload',
-          description: uploadErrors.join(', '),
+          description: imageUploadErrors.join(', '),
+          variant: 'destructive',
+        });
+      }
+      if (fileUploadErrors.length > 0) {
+        toast({
+          title: 'Some files failed to upload',
+          description: fileUploadErrors.join(', '),
           variant: 'destructive',
         });
       }
@@ -297,9 +409,23 @@ export function TaskDetailsDialog({
       const existingImages = task.images.map((img, index) => {
         const url = typeof img === 'string' ? img : img.url;
         const description = imageDescriptions[index]?.trim();
-        return description
-          ? { url, description }
-          : url;
+        // Only include description if it's not empty
+        if (description && description.length > 0) {
+          return { url, description };
+        }
+        return url;
+      });
+
+      // Prepare existing files with updated descriptions
+      const existingFiles = (task.files || []).map((file, index) => {
+        const url = typeof file === 'string' ? file : file.url;
+        const name = typeof file === 'string' ? 'Document' : file.name;
+        const description = fileDescriptions[index]?.trim();
+        // Only include description if it's not empty
+        if (description && description.length > 0) {
+          return { url, name, description };
+        }
+        return { url, name };
       });
 
       // Update task
@@ -311,6 +437,7 @@ export function TaskDetailsDialog({
         assignedMembers: formData.assignedMembers,
         assignedMemberNames,
         images: [...existingImages, ...uploadedImages],
+        files: [...existingFiles, ...uploadedFiles],
         expectedKpi: formData.expectedKpi.trim() || undefined,
         actualKpi: formData.actualKpi.trim() || undefined,
         eta: formData.eta,
@@ -323,9 +450,12 @@ export function TaskDetailsDialog({
       });
 
       setIsEditing(false);
+      setIsEditingActualKpi(false);
       setImagePreviews([]);
-      setSelectedFiles([]);
+      setSelectedImageFiles([]);
+      setSelectedDocumentFiles([]);
       setImageDescriptions({});
+      setFileDescriptions({});
       setMemberSearchQuery('');
       onTaskUpdated?.();
     } catch (error: any) {
@@ -341,6 +471,19 @@ export function TaskDetailsDialog({
 
   const handleStatusChange = async (newStatus: TaskStatus) => {
     if (!task) return;
+
+    // Validate that actualKpi is filled before allowing status change to Complete
+    if (newStatus === 'Complete') {
+      const currentActualKpi = task.actualKpi?.trim() || '';
+      if (!currentActualKpi) {
+        toast({
+          title: 'Cannot complete task',
+          description: 'Please fill in the Actual KPI before completing the task',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
 
     try {
       await updateTaskStatus(task.id, newStatus, {
@@ -441,6 +584,7 @@ export function TaskDetailsDialog({
         createdByName: user?.name || '',
         recurring: task.recurring || false,
         recurringFrequency: task.recurringFrequency || undefined,
+        collaborative: task.collaborative || false,
       });
 
       toast({
@@ -638,15 +782,88 @@ export function TaskDetailsDialog({
               )}
             </div>
             <div className="space-y-2">
-              <Label>Actual KPI</Label>
-              {isEditing ? (
-                <Input
-                  value={formData.actualKpi}
-                  onChange={(e) => setFormData(prev => ({ ...prev, actualKpi: e.target.value }))}
-                  placeholder="e.g., 92% completion rate"
-                />
+              <Label>Actual KPI *</Label>
+              {isEditingActualKpi ? (
+                <div className="flex gap-2">
+                  <Input
+                    value={formData.actualKpi}
+                    onChange={(e) => setFormData(prev => ({ ...prev, actualKpi: e.target.value }))}
+                    placeholder="e.g., 92% completion rate"
+                    disabled={isSavingActualKpi}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      if (!task) return;
+                      try {
+                        setIsSavingActualKpi(true);
+                        await updateTask(task.id, {
+                          taskId: task.taskId,
+                          name: task.name,
+                          description: task.description,
+                          date: task.date,
+                          assignedMembers: task.assignedMembers,
+                          assignedMemberNames: task.assignedMemberNames || [],
+                          images: task.images,
+                          files: task.files,
+                          expectedKpi: task.expectedKpi || '',
+                          actualKpi: formData.actualKpi.trim() || undefined,
+                          eta: task.eta,
+                          time: task.time || undefined,
+                        });
+                        setIsEditingActualKpi(false);
+                        toast({
+                          title: 'Actual KPI updated',
+                          description: 'Actual KPI has been updated successfully',
+                        });
+                        onTaskUpdated?.();
+                      } catch (error: any) {
+                        toast({
+                          title: 'Error',
+                          description: error.message || 'Failed to update Actual KPI',
+                          variant: 'destructive',
+                        });
+                      } finally {
+                        setIsSavingActualKpi(false);
+                      }
+                    }}
+                    disabled={isSavingActualKpi}
+                  >
+                    {isSavingActualKpi ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setIsEditingActualKpi(false);
+                      setFormData(prev => ({ ...prev, actualKpi: task.actualKpi || '' }));
+                    }}
+                    disabled={isSavingActualKpi}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               ) : (
-                <p className="text-muted-foreground">{task.actualKpi || 'No Actual KPI set'}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-muted-foreground flex-1">{task.actualKpi || 'No Actual KPI set'}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setIsEditingActualKpi(true);
+                      setFormData(prev => ({ ...prev, actualKpi: task.actualKpi || '' }));
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -818,143 +1035,326 @@ export function TaskDetailsDialog({
             )}
           </div>
 
-          {/* Images */}
+          {/* Images and Files */}
           <div className="space-y-2">
-            <Label>Images</Label>
-            {task.images.length > 0 && (
-              <div className="space-y-4">
-                {task.images.map((image, index) => {
-                  const imageUrl = typeof image === 'string' ? image : image.url;
-                  const imageDescription = typeof image === 'object' ? image.description : undefined;
-                  return (
-                    <div key={index} className="space-y-2">
-                      <div className="relative group">
-                        <img
-                          src={imageUrl}
-                          alt={`Task image ${index + 1}`}
-                          className="w-full h-32 object-cover rounded"
-                        />
-                        {isAdmin && !isEditing && (
-                          <button
-                            onClick={() => removeExistingImage(index)}
-                            disabled={uploadingIndex === index}
-                            className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            {uploadingIndex === index ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <X className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
-                      </div>
-                      {isEditing ? (
-                        <Input
-                          placeholder="Add description (optional)"
-                          value={imageDescriptions[index] || ''}
-                          onChange={(e) => {
-                            setImageDescriptions(prev => ({
-                              ...prev,
-                              [index]: e.target.value,
-                            }));
-                          }}
-                          className="text-sm"
-                        />
-                      ) : (
-                        imageDescription && (
-                          <p className="text-sm text-muted-foreground">{imageDescription}</p>
-                        )
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {isEditing && (
-              <div className="space-y-2">
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  className={cn(
-                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
-                    isDragging
-                      ? "border-primary bg-primary/10"
-                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
-                  )}
-                  onClick={() => document.getElementById('task-images-input')?.click()}
-                >
-                  <input
-                    id="task-images-input"
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handleFileSelect}
-                    disabled={isUploading}
-                    className="hidden"
-                  />
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="rounded-full border-2 border-muted-foreground/50 p-3">
-                      <Upload className="h-6 w-6 text-muted-foreground" />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">Drag & drop files here</p>
-                      <p className="text-xs text-muted-foreground">
-                        Or click to browse (max 2 files, up to 5MB each)
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        document.getElementById('task-images-input')?.click();
-                      }}
-                      disabled={isUploading}
-                    >
-                      Browse files
-                    </Button>
-                  </div>
-                </div>
-                {imagePreviews.length > 0 && (
-                  <div className="space-y-4 mt-2">
-                    {imagePreviews.map((preview, index) => {
-                      const imageIndex = task.images.length + index;
+            <Label>Attachments</Label>
+            <Tabs defaultValue="images" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="images">
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Images
+                </TabsTrigger>
+                <TabsTrigger value="files">
+                  <FileText className="h-4 w-4 mr-2" />
+                  Files
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="images" className="space-y-4">
+                {task.images.length > 0 && (
+                  <div className="space-y-4">
+                    {task.images.map((image, index) => {
+                      const imageUrl = typeof image === 'string' ? image : image.url;
+                      const imageDescription = typeof image === 'object' ? image.description : undefined;
                       return (
                         <div key={index} className="space-y-2">
                           <div className="relative group">
                             <img
-                              src={preview}
-                              alt={`Preview ${index + 1}`}
+                              src={imageUrl}
+                              alt={`Task image ${index + 1}`}
                               className="w-full h-32 object-cover rounded"
                             />
-                            <button
-                              type="button"
-                              onClick={() => removeImage(index)}
-                              className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
+                            {isAdmin && !isEditing && (
+                              <button
+                                onClick={() => removeExistingImage(index)}
+                                disabled={uploadingIndex === index}
+                                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                {uploadingIndex === index ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <X className="h-4 w-4" />
+                                )}
+                              </button>
+                            )}
                           </div>
-                          <Input
-                            placeholder="Add description (optional)"
-                            value={imageDescriptions[imageIndex] || ''}
-                            onChange={(e) => {
-                              setImageDescriptions(prev => ({
-                                ...prev,
-                                [imageIndex]: e.target.value,
-                              }));
-                            }}
-                            className="text-sm"
-                          />
+                          {isEditing ? (
+                            <Input
+                              placeholder="Add description (optional)"
+                              value={imageDescriptions[index] || ''}
+                              onChange={(e) => {
+                                setImageDescriptions(prev => ({
+                                  ...prev,
+                                  [index]: e.target.value,
+                                }));
+                              }}
+                              className="text-sm"
+                            />
+                          ) : (
+                            imageDescription && (
+                              <p className="text-sm text-muted-foreground">{imageDescription}</p>
+                            )
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 )}
-              </div>
-            )}
+                {isEditing && (
+                  <div className="space-y-2">
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={cn(
+                        "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                        isDragging
+                          ? "border-primary bg-primary/10"
+                          : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                      )}
+                      onClick={() => document.getElementById('task-images-input')?.click()}
+                    >
+                      <input
+                        id="task-images-input"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleImageFileSelect}
+                        disabled={isUploading}
+                        className="hidden"
+                      />
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="rounded-full border-2 border-muted-foreground/50 p-3">
+                          <Upload className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Drag & drop images here</p>
+                          <p className="text-xs text-muted-foreground">
+                            Or click to browse (max 2 files, up to 5MB each)
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById('task-images-input')?.click();
+                          }}
+                          disabled={isUploading}
+                        >
+                          Browse images
+                        </Button>
+                      </div>
+                    </div>
+                    {imagePreviews.length > 0 && (
+                      <div className="space-y-4 mt-2">
+                        {imagePreviews.map((preview, index) => {
+                          const imageIndex = task.images.length + index;
+                          return (
+                            <div key={index} className="space-y-2">
+                              <div className="relative group">
+                                <img
+                                  src={preview}
+                                  alt={`Preview ${index + 1}`}
+                                  className="w-full h-32 object-cover rounded"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeImage(index)}
+                                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                              <Input
+                                placeholder="Add description (optional)"
+                                value={imageDescriptions[imageIndex] || ''}
+                                onChange={(e) => {
+                                  setImageDescriptions(prev => ({
+                                    ...prev,
+                                    [imageIndex]: e.target.value,
+                                  }));
+                                }}
+                                className="text-sm"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="files" className="space-y-4">
+                {task.files && task.files.length > 0 && (
+                  <div className="space-y-4">
+                    {task.files.map((file, index) => {
+                      const fileUrl = typeof file === 'string' ? file : file.url;
+                      const fileName = typeof file === 'string' ? 'Document' : file.name;
+                      const fileDescription = typeof file === 'object' ? file.description : undefined;
+                      return (
+                        <div key={index} className="space-y-2">
+                          <div className="relative group p-4 border rounded-lg bg-muted/50">
+                            <div className="flex items-center gap-3">
+                              <FileText className="h-8 w-8 text-muted-foreground" />
+                              <div className="flex-1">
+                                <a
+                                  href={fileUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm font-medium hover:underline"
+                                >
+                                  {fileName}
+                                </a>
+                                {fileDescription && !isEditing && (
+                                  <p className="text-xs text-muted-foreground mt-1">{fileDescription}</p>
+                                )}
+                              </div>
+                              {isAdmin && !isEditing && (
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      setUploadingIndex(index);
+                                      const updatedFiles = task.files?.filter((_, i) => i !== index) || [];
+                                      await updateTaskFiles(task.id, updatedFiles);
+                                      toast({
+                                        title: 'File removed',
+                                        description: 'File has been removed from the task',
+                                      });
+                                      onTaskUpdated?.();
+                                    } catch (error: any) {
+                                      toast({
+                                        title: 'Error',
+                                        description: error.message || 'Failed to remove file',
+                                        variant: 'destructive',
+                                      });
+                                    } finally {
+                                      setUploadingIndex(null);
+                                    }
+                                  }}
+                                  disabled={uploadingIndex === index}
+                                  className="bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  {uploadingIndex === index ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <X className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            {isEditing && (
+                              <Input
+                                placeholder="Add description (optional)"
+                                value={fileDescriptions[index] || ''}
+                                onChange={(e) => {
+                                  setFileDescriptions(prev => ({
+                                    ...prev,
+                                    [index]: e.target.value,
+                                  }));
+                                }}
+                                className="text-sm mt-2"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {isEditing && (
+                  <div className="space-y-2">
+                    <div
+                      onDragOver={handleDragOverFiles}
+                      onDragLeave={handleDragLeaveFiles}
+                      onDrop={handleDropFiles}
+                      className={cn(
+                        "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                        isDraggingFiles
+                          ? "border-primary bg-primary/10"
+                          : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                      )}
+                      onClick={() => document.getElementById('task-files-input')?.click()}
+                    >
+                      <input
+                        id="task-files-input"
+                        type="file"
+                        accept="application/pdf"
+                        multiple
+                        onChange={handleDocumentFileSelect}
+                        disabled={isUploading}
+                        className="hidden"
+                      />
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="rounded-full border-2 border-muted-foreground/50 p-3">
+                          <Upload className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Drag & drop PDF files here</p>
+                          <p className="text-xs text-muted-foreground">
+                            Or click to browse (max 2 files, up to 5MB each)
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById('task-files-input')?.click();
+                          }}
+                          disabled={isUploading}
+                        >
+                          Browse files
+                        </Button>
+                      </div>
+                    </div>
+                    {selectedDocumentFiles.length > 0 && (
+                      <div className="space-y-4 mt-2">
+                        {selectedDocumentFiles.map((file, index) => {
+                          const fileIndex = (task.files?.length || 0) + index;
+                          return (
+                            <div key={index} className="space-y-2">
+                              <div className="relative group p-4 border rounded-lg bg-muted/50">
+                                <div className="flex items-center gap-3">
+                                  <FileText className="h-8 w-8 text-muted-foreground" />
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium">{file.name}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeDocumentFile(index)}
+                                    className="bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                                <Input
+                                  placeholder="Add description (optional)"
+                                  value={fileDescriptions[fileIndex] || ''}
+                                  onChange={(e) => {
+                                    setFileDescriptions(prev => ({
+                                      ...prev,
+                                      [fileIndex]: e.target.value,
+                                    }));
+                                  }}
+                                  className="text-sm mt-2"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
 
           <Separator />
@@ -1056,6 +1456,72 @@ export function TaskDetailsDialog({
             </>
           )}
 
+          {/* Collaborative Task Completion Status */}
+          {task.collaborative && task.assignedMembers && task.assignedMembers.length > 0 && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Collaborative Task Progress</Label>
+                <div className="space-y-2">
+                  {task.assignedMembers.map((memberId) => {
+                    const memberIndex = task.assignedMembers.indexOf(memberId);
+                    const memberName = task.assignedMemberNames?.[memberIndex] || 
+                      users.find(u => u.id === memberId)?.name || 
+                      'Unknown';
+                    const completed = task.completedBy?.some(entry => entry.userId === memberId);
+                    
+                    return (
+                      <div
+                        key={memberId}
+                        className="flex items-center gap-3 p-3 rounded-lg border bg-card"
+                      >
+                        <div className={cn(
+                          "w-2 h-2 rounded-full flex-shrink-0",
+                          completed ? "bg-green-500" : "bg-gray-400"
+                        )} />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{memberName}</span>
+                            {completed && (
+                              <Badge className="bg-green-500">
+                                Completed
+                              </Badge>
+                            )}
+                            {!completed && (
+                              <Badge variant="outline">
+                                Pending
+                              </Badge>
+                            )}
+                          </div>
+                          {completed && (() => {
+                            const completionEntry = task.completedBy?.find(entry => entry.userId === memberId);
+                            return completionEntry ? (
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Completed on: {format(completionEntry.completedAt, 'PPP p')}
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {task.completedBy && task.completedBy.length > 0 && (
+                  <div className="mt-3 p-3 rounded-lg bg-muted">
+                    <p className="text-sm font-medium">
+                      {task.completedBy.length} of {task.assignedMembers.length} members completed
+                    </p>
+                    {task.completedBy.length === task.assignedMembers.length && (
+                      <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                        ✓ All members have completed this task
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           {/* Status History */}
           {task.statusHistory && task.statusHistory.length > 0 && (
             <>
@@ -1104,6 +1570,7 @@ export function TaskDetailsDialog({
                 variant="outline"
                 onClick={() => {
                   setIsEditing(false);
+                  setIsEditingActualKpi(false);
                   if (task) {
                     setFormData({
                       taskId: task.taskId,
@@ -1119,18 +1586,30 @@ export function TaskDetailsDialog({
                     });
                   }
                   setImagePreviews([]);
-                  setSelectedFiles([]);
+                  setSelectedImageFiles([]);
+                  setSelectedDocumentFiles([]);
                   // Reset image descriptions to current task values
                   if (task) {
-                    const descriptions: { [key: number]: string } = {};
+                    const imgDesc: { [key: number]: string } = {};
                     task.images.forEach((img, index) => {
                       if (typeof img === 'object' && img.description) {
-                        descriptions[index] = img.description;
+                        imgDesc[index] = img.description;
                       }
                     });
-                    setImageDescriptions(descriptions);
+                    setImageDescriptions(imgDesc);
+                    // Reset file descriptions to current task values
+                    const fileDesc: { [key: number]: string } = {};
+                    if (task.files) {
+                      task.files.forEach((file, index) => {
+                        if (typeof file === 'object' && file.description) {
+                          fileDesc[index] = file.description;
+                        }
+                      });
+                    }
+                    setFileDescriptions(fileDesc);
                   } else {
                     setImageDescriptions({});
+                    setFileDescriptions({});
                   }
                 }}
               >

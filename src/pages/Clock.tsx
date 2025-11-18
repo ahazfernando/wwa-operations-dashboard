@@ -125,6 +125,7 @@ const Clock = () => {
   const [clockUserDialogOpen, setClockUserDialogOpen] = useState(false);
   const [selectedUserForClock, setSelectedUserForClock] = useState<{ id: string; name: string; email: string } | null>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [selectedUserClockedIn, setSelectedUserClockedIn] = useState(false);
   
   // Admin delete session states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -684,6 +685,31 @@ const Clock = () => {
     }
   };
 
+  // Function to check if a user is clocked in
+  const checkUserClockStatus = async (userId: string) => {
+    try {
+      const q = query(
+        collection(db, 'timeEntries'),
+        where('userId', '==', userId)
+      );
+
+      const querySnapshot = await getDocs(q);
+      const activeEntry = querySnapshot.docs.find(doc => {
+        try {
+          const data = getTimeEntryData(doc.data());
+          return data.clockIn && !data.clockOut;
+        } catch {
+          return false;
+        }
+      });
+
+      setSelectedUserClockedIn(!!activeEntry);
+    } catch (error) {
+      console.error('Error checking user clock status:', error);
+      setSelectedUserClockedIn(false);
+    }
+  };
+
   // Function to clock in/out for another user
   const handleClockUser = async (action: 'in' | 'out') => {
     if (!selectedUserForClock || !user || user.role !== 'admin') return;
@@ -756,6 +782,9 @@ const Clock = () => {
           title: 'Success',
           description: `Clocked in ${selectedUserForClock.name} at ${format(now, 'h:mm a')}`,
         });
+        
+        // Update clock status after clocking in
+        setSelectedUserClockedIn(true);
       } else {
         // Clock out - find active entry
         // Query all entries to handle clock-ins that span midnight
@@ -797,10 +826,14 @@ const Clock = () => {
           title: 'Success',
           description: `Clocked out ${selectedUserForClock.name} at ${format(now, 'h:mm a')}. Total hours: ${Math.round(totalHours * 100) / 100}h`,
         });
+        
+        // Update clock status after clocking out
+        setSelectedUserClockedIn(false);
       }
 
       setClockUserDialogOpen(false);
       setSelectedUserForClock(null);
+      setSelectedUserClockedIn(false);
       await loadAllUsersEntries();
       await loadActiveUsers();
     } catch (error: any) {
@@ -1336,19 +1369,43 @@ const Clock = () => {
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Sri Lankan Time</p>
                 <div className="text-4xl font-bold text-primary">
-                  {format(currentTime, 'h:mm:ss a')}
+                  {new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Asia/Colombo',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true,
+                  }).format(currentTime)}
                 </div>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {format(currentTime, 'EEEE, MMMM dd, yyyy')}
+                  {new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Asia/Colombo',
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  }).format(currentTime)}
                 </p>
               </div>
               <div className="border-l pl-4">
                 <p className="text-sm text-muted-foreground mb-1">Australian Time</p>
                 <div className="text-4xl font-bold text-primary">
-                  {format(new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000), 'h:mm:ss a')}
+                  {new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Australia/Sydney',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true,
+                  }).format(currentTime)}
                 </div>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {format(new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000), 'EEEE, MMMM dd, yyyy')}
+                  {new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Australia/Sydney',
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  }).format(currentTime)}
                 </p>
               </div>
             </div>
@@ -2456,7 +2513,20 @@ const Clock = () => {
       </Dialog>
 
       {/* Clock User In/Out Dialog */}
-      <Dialog open={clockUserDialogOpen} onOpenChange={setClockUserDialogOpen}>
+      <Dialog 
+        open={clockUserDialogOpen} 
+        onOpenChange={(open) => {
+          setClockUserDialogOpen(open);
+          if (!open) {
+            // Reset state when dialog closes
+            setSelectedUserForClock(null);
+            setSelectedUserClockedIn(false);
+          } else if (selectedUserForClock) {
+            // Check status when dialog opens if user is already selected
+            checkUserClockStatus(selectedUserForClock.id);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Clock User In/Out</DialogTitle>
@@ -2477,6 +2547,8 @@ const Clock = () => {
                       name: selectedUser.name || `${selectedUser.firstName || ''} ${selectedUser.lastName || ''}`.trim() || selectedUser.email,
                       email: selectedUser.email,
                     });
+                    // Check if the selected user is clocked in
+                    checkUserClockStatus(userId);
                   }
                 }}
               >
@@ -2499,7 +2571,7 @@ const Clock = () => {
                   <Button
                     onClick={() => handleClockUser('in')}
                     className="flex-1"
-                    disabled={submitting}
+                    disabled={submitting || selectedUserClockedIn}
                   >
                     <LogIn className="h-4 w-4 mr-2" />
                     Clock In
@@ -2508,7 +2580,7 @@ const Clock = () => {
                     onClick={() => handleClockUser('out')}
                     variant="outline"
                     className="flex-1"
-                    disabled={submitting}
+                    disabled={submitting || !selectedUserClockedIn}
                   >
                     <LogOut className="h-4 w-4 mr-2" />
                     Clock Out

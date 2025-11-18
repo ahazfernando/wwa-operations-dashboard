@@ -46,6 +46,16 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       return;
     }
 
+    // Validate that actualKpi is filled before allowing status change to Complete
+    if (newStatus === 'Complete' && (!task.actualKpi || task.actualKpi.trim() === '')) {
+      toast({
+        title: 'Cannot complete task',
+        description: 'Please fill in the Actual KPI before completing the task',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       setIsUpdating(true);
       await updateTaskStatus(task.id, newStatus, {

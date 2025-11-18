@@ -14,11 +14,13 @@ import { TaskDetailsDialog } from '@/components/tasks/TaskDetailsDialog';
 import { getAllTasks, getTasksByUser, updateTaskStatus, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
 import { Task, TaskStatus } from '@/types/task';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Search, CalendarIcon, X, CheckCircle2, Download, Users } from 'lucide-react';
+import { Plus, Search, CalendarIcon, X, CheckCircle2, Download, Users, UsersRound } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { format } from 'date-fns';
 import { type DateRange } from 'react-day-picker';
 import { cn } from '@/lib/utils';
@@ -51,11 +53,13 @@ const Tasks = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
+  const [showCollaborativeOnly, setShowCollaborativeOnly] = useState(false);
   
   // Completed tasks filter states
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [completedDateRange, setCompletedDateRange] = useState<DateRange | undefined>();
   const [completedSelectedEmployee, setCompletedSelectedEmployee] = useState<string>('all');
+  const [showCompletedCollaborativeOnly, setShowCompletedCollaborativeOnly] = useState(false);
 
   const isAdmin = user?.role === 'admin';
 
@@ -153,7 +157,7 @@ const Tasks = () => {
     }
   };
 
-  // Filter tasks based on search query, date range, and employee
+  // Filter tasks based on search query, date range, employee, and collaborative filter
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
 
@@ -162,6 +166,11 @@ const Tasks = () => {
       filtered = filtered.filter(task => 
         task.assignedMembers.includes(selectedEmployee)
       );
+    }
+
+    // Filter by collaborative tasks
+    if (showCollaborativeOnly) {
+      filtered = filtered.filter(task => task.collaborative === true);
     }
 
     // Filter by search query
@@ -201,7 +210,7 @@ const Tasks = () => {
     }
 
     return filtered;
-  }, [tasks, searchQuery, dateRange, selectedEmployee, isAdmin]);
+  }, [tasks, searchQuery, dateRange, selectedEmployee, showCollaborativeOnly, isAdmin]);
 
   const getTasksByStatus = (status: TaskStatus): Task[] => {
     if (status === 'Complete') {
@@ -273,6 +282,16 @@ const Tasks = () => {
         return;
       }
 
+      // Validate that actualKpi is filled before allowing status change to Complete
+      if (newStatus === 'Complete' && (!task.actualKpi || task.actualKpi.trim() === '')) {
+        toast({
+          title: 'Cannot complete task',
+          description: 'Please fill in the Actual KPI before completing the task',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       try {
         // Optimistically update UI
         setTasks(prevTasks =>
@@ -323,6 +342,11 @@ const Tasks = () => {
       filteredCompleted = filteredCompleted.filter(task => 
         task.assignedMembers.includes(completedSelectedEmployee)
       );
+    }
+
+    // Filter by collaborative tasks
+    if (showCompletedCollaborativeOnly) {
+      filteredCompleted = filteredCompleted.filter(task => task.collaborative === true);
     }
 
     if (completedSearchQuery.trim()) {
@@ -446,9 +470,10 @@ const Tasks = () => {
     setSearchQuery('');
     setDateRange(undefined);
     setSelectedEmployee('all');
+    setShowCollaborativeOnly(false);
   };
 
-  const hasActiveFilters = searchQuery.trim() !== '' || dateRange?.from || dateRange?.to || (isAdmin && selectedEmployee !== 'all');
+  const hasActiveFilters = searchQuery.trim() !== '' || dateRange?.from || dateRange?.to || (isAdmin && selectedEmployee !== 'all') || showCollaborativeOnly;
 
   return (
     <div className="space-y-6">
@@ -545,6 +570,22 @@ const Tasks = () => {
             )}
           </PopoverContent>
         </Popover>
+
+        {/* Collaborative Tasks Filter */}
+        <div className="flex items-center space-x-2 px-3 py-2 border rounded-md bg-background">
+          <Checkbox
+            id="collaborative-filter"
+            checked={showCollaborativeOnly}
+            onCheckedChange={(checked) => setShowCollaborativeOnly(checked === true)}
+          />
+          <Label
+            htmlFor="collaborative-filter"
+            className="text-sm font-normal cursor-pointer flex items-center gap-2"
+          >
+            <UsersRound className="h-4 w-4 text-muted-foreground" />
+            Collaborative Tasks
+          </Label>
+        </div>
 
         {/* Clear Filters Button */}
         {hasActiveFilters && (
@@ -703,8 +744,24 @@ const Tasks = () => {
                 </PopoverContent>
               </Popover>
 
+              {/* Collaborative Tasks Filter */}
+              <div className="flex items-center space-x-2 px-3 py-2 border rounded-md bg-background">
+                <Checkbox
+                  id="completed-collaborative-filter"
+                  checked={showCompletedCollaborativeOnly}
+                  onCheckedChange={(checked) => setShowCompletedCollaborativeOnly(checked === true)}
+                />
+                <Label
+                  htmlFor="completed-collaborative-filter"
+                  className="text-sm font-normal cursor-pointer flex items-center gap-2"
+                >
+                  <UsersRound className="h-4 w-4 text-muted-foreground" />
+                  Collaborative Tasks
+                </Label>
+              </div>
+
               {/* Clear Filters Button */}
-              {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all')) && (
+              {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all') || showCompletedCollaborativeOnly) && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -712,6 +769,7 @@ const Tasks = () => {
                     setCompletedSearchQuery('');
                     setCompletedDateRange(undefined);
                     setCompletedSelectedEmployee('all');
+                    setShowCompletedCollaborativeOnly(false);
                   }}
                   className="text-muted-foreground"
                 >
@@ -743,6 +801,11 @@ const Tasks = () => {
               filteredCompleted = filteredCompleted.filter(task => 
                 task.assignedMembers.includes(completedSelectedEmployee)
               );
+            }
+
+            // Filter by collaborative tasks
+            if (showCompletedCollaborativeOnly) {
+              filteredCompleted = filteredCompleted.filter(task => task.collaborative === true);
             }
 
             // Filter by search query
@@ -799,11 +862,11 @@ const Tasks = () => {
                   <div className="text-center py-8 text-muted-foreground">
                     <CheckCircle2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>
-                      {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all'))
+                      {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all') || showCompletedCollaborativeOnly)
                         ? 'No completed tasks found matching your filters'
                         : 'No completed tasks yet'}
                     </p>
-                    {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all')) && (
+                    {(completedSearchQuery.trim() !== '' || completedDateRange?.from || completedDateRange?.to || (isAdmin && completedSelectedEmployee !== 'all') || showCompletedCollaborativeOnly) && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -811,6 +874,7 @@ const Tasks = () => {
                           setCompletedSearchQuery('');
                           setCompletedDateRange(undefined);
                           setCompletedSelectedEmployee('all');
+                          setShowCompletedCollaborativeOnly(false);
                         }}
                         className="mt-4"
                       >

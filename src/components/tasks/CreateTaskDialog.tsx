@@ -48,6 +48,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     time: '09:00',
     recurring: false,
     recurringFrequency: [] as string[], // Array of day names or ['all'] for all days
+    collaborative: false,
   });
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -247,6 +248,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         createdByName: user?.name || '',
         recurring: formData.recurring,
         recurringFrequency: formData.recurring ? formData.recurringFrequency : undefined,
+        collaborative: formData.collaborative,
       });
 
       toast({
@@ -268,6 +270,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         time: '09:00',
         recurring: false,
         recurringFrequency: [],
+        collaborative: false,
       });
       setSelectedFiles([]);
       setImagePreviews([]);
@@ -454,6 +457,32 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="collaborative">Collaborative Task</Label>
+            <Select
+              value={formData.collaborative ? 'yes' : 'no'}
+              onValueChange={(value) => {
+                setFormData(prev => ({ 
+                  ...prev, 
+                  collaborative: value === 'yes'
+                }));
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">No</SelectItem>
+                <SelectItem value="yes">Yes</SelectItem>
+              </SelectContent>
+            </Select>
+            {formData.collaborative && (
+              <p className="text-xs text-muted-foreground">
+                All assigned members must complete this task for it to be marked as fully completed
+              </p>
+            )}
           </div>
 
           {formData.recurring && (

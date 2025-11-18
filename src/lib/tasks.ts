@@ -1,6 +1,6 @@
 import { collection, addDoc, updateDoc, doc, getDocs, query, where, orderBy, Timestamp, deleteDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Task, FirestoreTask, TaskStatus, StatusChange, TaskImage } from '@/types/task';
+import { Task, FirestoreTask, TaskStatus, StatusChange, TaskImage, TaskFile, CompletedBy } from '@/types/task';
 
 /**
  * Convert Firestore task to app Task
@@ -26,6 +26,25 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     };
   });
 
+  // Normalize files: convert strings to objects for backward compatibility
+  const files: (string | TaskFile)[] = (docData.files || []).map((file: any) => {
+    if (typeof file === 'string') {
+      return file; // Keep as string for backward compatibility
+    }
+    return {
+      url: file.url || '',
+      name: file.name || '',
+      description: file.description || '',
+    };
+  });
+
+  // Normalize completedBy: convert Firestore timestamps to Dates
+  const completedBy: CompletedBy[] = (docData.completedBy || []).map((entry: any) => ({
+    userId: entry.userId || '',
+    userName: entry.userName || '',
+    completedAt: entry.completedAt?.toDate() || new Date(),
+  }));
+
   return {
     id: docId,
     taskId: docData.taskId || '',
@@ -36,6 +55,7 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     assignedMembers: docData.assignedMembers || [],
     assignedMemberNames: docData.assignedMemberNames || [],
     images,
+    files: files.length > 0 ? files : undefined,
     expectedKpi: docData.expectedKpi || '',
     actualKpi: docData.actualKpi || '',
     eta: docData.eta?.toDate() || undefined,
@@ -48,6 +68,8 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     recurring: docData.recurring || false,
     recurringFrequency: docData.recurringFrequency || undefined,
     parentTaskId: docData.parentTaskId || undefined,
+    collaborative: docData.collaborative || false,
+    completedBy: completedBy.length > 0 ? completedBy : undefined,
   };
 }
 
@@ -71,6 +93,7 @@ export async function createTask(taskData: {
   recurring?: boolean;
   recurringFrequency?: string[];
   parentTaskId?: string;
+  collaborative?: boolean;
 }): Promise<string> {
   if (!db) {
     throw new Error('Firebase is not initialized. Please check your environment variables.');
@@ -84,6 +107,7 @@ export async function createTask(taskData: {
       changedByName: taskData.createdByName,
     }];
 
+    const sanitizedImages = sanitizeImages(taskData.images);
     const docRef = await addDoc(collection(db, 'tasks'), {
       taskId: taskData.taskId,
       name: taskData.name,
@@ -92,7 +116,7 @@ export async function createTask(taskData: {
       status: 'New' as TaskStatus,
       assignedMembers: taskData.assignedMembers,
       assignedMemberNames: taskData.assignedMemberNames,
-      images: taskData.images,
+      images: sanitizedImages,
       expectedKpi: taskData.expectedKpi || '',
       actualKpi: taskData.actualKpi || '',
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
@@ -105,6 +129,8 @@ export async function createTask(taskData: {
       recurring: taskData.recurring || false,
       recurringFrequency: taskData.recurringFrequency || null,
       parentTaskId: taskData.parentTaskId || null,
+      collaborative: taskData.collaborative || false,
+      completedBy: [],
     });
 
     return docRef.id;
@@ -137,8 +163,101 @@ export async function updateTaskStatus(
 
     const currentData = taskDoc.data();
     const currentStatus = currentData.status as TaskStatus;
+    const isCollaborative = currentData.collaborative === true;
+    const assignedMembers = currentData.assignedMembers || [];
+    const completedBy = currentData.completedBy || [];
+    const actualKpi = currentData.actualKpi || '';
     
-    // Only track if status is actually changing
+    // Validate that actualKpi is filled before allowing status change to Complete
+    // (Skip this check for collaborative tasks as they have their own completion logic)
+    if (status === 'Complete' && !isCollaborative && (!actualKpi || actualKpi.trim() === '')) {
+      throw new Error('Cannot complete task: Actual KPI must be filled before completing the task');
+    }
+    
+    // Handle collaborative task completion logic
+    if (isCollaborative && status === 'Complete' && options?.changedBy) {
+      const userId = options.changedBy;
+      const userName = options.changedByName || 'Unknown';
+      
+      // Check if user has already completed this task
+      const alreadyCompleted = completedBy.some((entry: any) => entry.userId === userId);
+      
+      if (!alreadyCompleted) {
+        // Add user to completedBy array
+        const now = Timestamp.now();
+        const newCompletedBy = [
+          ...completedBy,
+          {
+            userId,
+            userName,
+            completedAt: now,
+          }
+        ];
+        
+        // Check if all assigned members have completed
+        const allCompleted = assignedMembers.every((memberId: string) =>
+          newCompletedBy.some((entry: any) => entry.userId === memberId)
+        );
+        
+        // Get existing status history or initialize empty array
+        const existingHistory = currentData.statusHistory || [];
+        
+        // Add status history entry showing user completed
+        const completionStatusChange = {
+          status: 'Progress' as TaskStatus,
+          timestamp: now,
+          changedBy: userId,
+          changedByName: `${userName} completed their part`,
+        };
+        
+        const updatedHistory = [...existingHistory, completionStatusChange];
+        
+        // If all members completed, check if actualKpi is filled before marking as Complete
+        if (allCompleted) {
+          // Validate that actualKpi is filled before allowing status change to Complete
+          if (!actualKpi || actualKpi.trim() === '') {
+            // Keep as Progress if actualKpi is not filled
+            await updateDoc(doc(db, 'tasks', taskId), {
+              status: 'Progress' as TaskStatus,
+              completedBy: newCompletedBy,
+              statusHistory: updatedHistory,
+              updatedAt: now,
+            });
+            throw new Error('Cannot complete task: Actual KPI must be filled before completing the task');
+          }
+          
+          const finalStatusChange = {
+            status: 'Complete' as TaskStatus,
+            timestamp: now,
+            changedBy: userId,
+            changedByName: `${userName} - All members completed`,
+          };
+          updatedHistory.push(finalStatusChange);
+          
+          await updateDoc(doc(db, 'tasks', taskId), {
+            status: 'Complete' as TaskStatus,
+            completedBy: newCompletedBy,
+            statusHistory: updatedHistory,
+            updatedAt: now,
+          });
+        } else {
+          // Not all completed, keep as Progress
+          await updateDoc(doc(db, 'tasks', taskId), {
+            status: 'Progress' as TaskStatus,
+            completedBy: newCompletedBy,
+            statusHistory: updatedHistory,
+            updatedAt: now,
+          });
+        }
+        
+        return; // Exit early, we've handled the collaborative completion
+      } else {
+        // User already completed, don't do anything
+        return;
+      }
+    }
+    
+    // Only track if status is actually changing (for non-collaborative or non-complete status changes)
     if (currentStatus !== status) {
       const now = Timestamp.now();
       const statusChange = {
@@ -194,6 +313,7 @@ export async function updateTaskStatus(
             recurring: true, // Keep it as recurring
             recurringFrequency: currentData.recurringFrequency || undefined,
             parentTaskId: parentId, // Link to the original recurring task
+            collaborative: currentData.collaborative || false,
           };
 
           await createTask(newTaskData);
@@ -215,6 +335,40 @@ export async function updateTaskStatus(
 }
 
 /**
+ * Sanitize images array to remove undefined values (Firebase doesn't allow undefined)
+ */
+function sanitizeImages(images: (string | TaskImage)[]): (string | TaskImage)[] {
+  return images.map(img => {
+    if (typeof img === 'string') {
+      return img;
+    }
+    // Remove undefined description field
+    const sanitized: TaskImage = { url: img.url };
+    if (img.description !== undefined && img.description !== null && img.description !== '') {
+      sanitized.description = img.description;
+    }
+    return sanitized;
+  });
+}
+
+/**
+ * Sanitize files array to remove undefined values (Firebase doesn't allow undefined)
+ */
+function sanitizeFiles(files: (string | TaskFile)[]): (string | TaskFile)[] {
+  return files.map(file => {
+    if (typeof file === 'string') {
+      return file;
+    }
+    // Remove undefined description field
+    const sanitized: TaskFile = { url: file.url, name: file.name };
+    if (file.description !== undefined && file.description !== null && file.description !== '') {
+      sanitized.description = file.description;
+    }
+    return sanitized;
+  });
+}
+
+/**
  * Update task images
  */
 export async function updateTaskImages(taskId: string, images: (string | TaskImage)[]): Promise<void> {
@@ -222,12 +376,32 @@ export async function updateTaskImages(taskId: string, images: (string | TaskIma
     throw new Error('Firebase is not initialized. Please check your environment variables.');
   }
   try {
+    const sanitizedImages = sanitizeImages(images);
     await updateDoc(doc(db, 'tasks', taskId), {
-      images,
+      images: sanitizedImages,
       updatedAt: Timestamp.now(),
     });
   } catch (error) {
     console.error('Error updating task images:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update task files
+ */
+export async function updateTaskFiles(taskId: string, files: (string | TaskFile)[]): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
+  try {
+    const sanitizedFiles = sanitizeFiles(files);
+    await updateDoc(doc(db, 'tasks', taskId), {
+      files: sanitizedFiles,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error updating task files:', error);
     throw error;
   }
 }
@@ -245,6 +419,7 @@ export async function updateTask(
     assignedMembers: string[];
     assignedMemberNames: string[];
     images: (string | TaskImage)[];
+    files?: (string | TaskFile)[];
     expectedKpi?: string;
     actualKpi?: string;
     eta?: Date;
@@ -255,20 +430,28 @@ export async function updateTask(
     throw new Error('Firebase is not initialized. Please check your environment variables.');
   }
   try {
-    await updateDoc(doc(db, 'tasks', taskId), {
+    const sanitizedImages = sanitizeImages(taskData.images);
+    const updateData: any = {
       taskId: taskData.taskId,
       name: taskData.name,
       description: taskData.description,
       date: Timestamp.fromDate(taskData.date),
       assignedMembers: taskData.assignedMembers,
       assignedMemberNames: taskData.assignedMemberNames,
-      images: taskData.images,
+      images: sanitizedImages,
       expectedKpi: taskData.expectedKpi || '',
       actualKpi: taskData.actualKpi || '',
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
       time: taskData.time || '',
       updatedAt: Timestamp.now(),
-    });
+    };
+    
+    if (taskData.files !== undefined) {
+      const sanitizedFiles = sanitizeFiles(taskData.files);
+      updateData.files = sanitizedFiles;
+    }
+    
+    await updateDoc(doc(db, 'tasks', taskId), updateData);
   } catch (error) {
     console.error('Error updating task:', error);
     throw error;

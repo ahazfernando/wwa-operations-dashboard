@@ -54,6 +54,7 @@ import { getCompletedTasksByUser } from '@/lib/tasks'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ImageCropDialog } from '@/components/ImageCropDialog'
 import { DragDropFileUpload } from '@/components/DragDropFileUpload'
+import { PhoneInput } from '@/components/PhoneInput'
 
 const FormSchema = z.object({
   fullName: z.string().optional(),
@@ -186,6 +187,8 @@ const Profile: React.FC = () => {
   const { user: authUser } = useAuth()
   const [cropDialogOpen, setCropDialogOpen] = useState(false)
   const [imageToCrop, setImageToCrop] = useState<string | null>(null)
+  const [periodFilter, setPeriodFilter] = useState<'this-year' | 'last-year' | 'all-time'>('this-year')
+  const [monthFilter, setMonthFilter] = useState<string>('all')
 
   const fileInputRefs = useRef<Record<UploadKey, HTMLInputElement | null>>({
     profilePhoto: null,
@@ -337,7 +340,7 @@ const Profile: React.FC = () => {
             }
           }
           
-          // Load attendance metrics
+          // Load attendance metrics with current filters
           await loadAttendanceMetrics(user.uid)
         } catch (error) {
           console.error('Error loading profile:', error)
@@ -352,6 +355,13 @@ const Profile: React.FC = () => {
     return unsubscribe
   }, [auth, db, form, toast])
 
+  // Reload metrics when filters change
+  useEffect(() => {
+    if (currentUser) {
+      loadAttendanceMetrics(currentUser.uid)
+    }
+  }, [periodFilter, monthFilter, currentUser])
+
   const loadAttendanceMetrics = async (userId: string) => {
     if (!db) return
     
@@ -365,7 +375,7 @@ const Profile: React.FC = () => {
       )
       
       const timeEntriesSnapshot = await getDocs(timeEntriesQuery)
-      const entries = timeEntriesSnapshot.docs.map((doc) => {
+      let entries = timeEntriesSnapshot.docs.map((doc) => {
         const data = doc.data()
         return {
           clockIn: data.clockIn?.toDate() || null,
@@ -373,6 +383,32 @@ const Profile: React.FC = () => {
           date: data.date?.toDate() || null,
         }
       }).filter(entry => entry.clockIn !== null)
+      
+      // Apply period filter
+      const now = new Date()
+      const currentYear = now.getFullYear()
+      
+      if (periodFilter === 'this-year') {
+        entries = entries.filter(e => {
+          const entryDate = e.date || e.clockIn
+          return entryDate && entryDate.getFullYear() === currentYear
+        })
+      } else if (periodFilter === 'last-year') {
+        entries = entries.filter(e => {
+          const entryDate = e.date || e.clockIn
+          return entryDate && entryDate.getFullYear() === currentYear - 1
+        })
+      }
+      // 'all-time' doesn't need filtering
+      
+      // Apply month filter
+      if (monthFilter !== 'all') {
+        const monthIndex = parseInt(monthFilter)
+        entries = entries.filter(e => {
+          const entryDate = e.date || e.clockIn
+          return entryDate && entryDate.getMonth() === monthIndex
+        })
+      }
       
       // Calculate total attendance (unique days with clock in)
       const uniqueDates = new Set(
@@ -392,16 +428,40 @@ const Profile: React.FC = () => {
         ? format(clockInTimes[0], 'HH:mm')
         : null
       
-      // Load completed tasks
+      // Load completed tasks with date filtering
       let completedTasks = 0
       try {
         const completedTasksList = await getCompletedTasksByUser(userId)
-        completedTasks = completedTasksList.length
+        
+        // Filter tasks by period and month
+        let filteredTasks = completedTasksList
+        
+        if (periodFilter === 'this-year') {
+          filteredTasks = filteredTasks.filter(task => {
+            const completedDate = task.statusHistory?.find(h => h.status === 'Complete')?.timestamp || task.updatedAt
+            return completedDate && completedDate.getFullYear() === currentYear
+          })
+        } else if (periodFilter === 'last-year') {
+          filteredTasks = filteredTasks.filter(task => {
+            const completedDate = task.statusHistory?.find(h => h.status === 'Complete')?.timestamp || task.updatedAt
+            return completedDate && completedDate.getFullYear() === currentYear - 1
+          })
+        }
+        
+        if (monthFilter !== 'all') {
+          const monthIndex = parseInt(monthFilter)
+          filteredTasks = filteredTasks.filter(task => {
+            const completedDate = task.statusHistory?.find(h => h.status === 'Complete')?.timestamp || task.updatedAt
+            return completedDate && completedDate.getMonth() === monthIndex
+          })
+        }
+        
+        completedTasks = filteredTasks.length
       } catch (error) {
         console.error('Error loading completed tasks:', error)
       }
       
-      // Load employee rating
+      // Load employee rating (ratings are typically not time-filtered, but we can add it if needed)
       let employeeRating: number | null = null
       try {
         const ratingsQuery = query(
@@ -436,6 +496,128 @@ const Profile: React.FC = () => {
       console.error('Error loading attendance metrics:', error)
     } finally {
       setLoadingMetrics(false)
+    }
+  }
+
+  const handleDownloadInfo = async () => {
+    if (!currentUser) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'User not authenticated. Please log in to download your profile information.',
+      })
+      return
+    }
+
+    try {
+      // Get current form values
+      const formValues = form.getValues()
+      
+      // Get month name for filename
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                          'July', 'August', 'September', 'October', 'November', 'December']
+      const monthName = monthFilter !== 'all' ? monthNames[parseInt(monthFilter)] : 'All'
+      const periodName = periodFilter === 'this-year' ? 'This Year' : 
+                        periodFilter === 'last-year' ? 'Last Year' : 'All Time'
+      
+      // Create CSV content
+      const escapeCSV = (value: any): string => {
+        if (value === null || value === undefined) return ''
+        const str = String(value)
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`
+        }
+        return str
+      }
+
+      // Build CSV rows
+      const rows: string[] = []
+      
+      // Header section
+      rows.push('Profile Information Export')
+      rows.push(`Generated: ${format(new Date(), 'MMMM dd, yyyy HH:mm:ss')}`)
+      rows.push(`Filter Period: ${periodName}`)
+      rows.push(`Filter Month: ${monthName}`)
+      rows.push('')
+      
+      // Personal Information Section
+      rows.push('=== PERSONAL INFORMATION ===')
+      rows.push('Field,Value')
+      rows.push(`Full Name,${escapeCSV(formValues.fullName || 'N/A')}`)
+      rows.push(`Preferred Name,${escapeCSV(formValues.preferredName || 'N/A')}`)
+      rows.push(`Email Address,${escapeCSV(formValues.email || 'N/A')}`)
+      rows.push(`Phone Number,${escapeCSV(formValues.phone || 'N/A')}`)
+      rows.push(`Date of Birth,${escapeCSV(formValues.dob ? format(new Date(formValues.dob), 'MMMM dd, yyyy') : 'N/A')}`)
+      rows.push(`Job Role/Title,${escapeCSV(formValues.jobRole || 'N/A')}`)
+      rows.push(`Work Location,${escapeCSV(formValues.workLocation || 'N/A')}`)
+      rows.push(`Gender,${escapeCSV(formValues.gender || 'N/A')}`)
+      rows.push(`Employee Type,${escapeCSV(formValues.employeeType || 'N/A')}`)
+      rows.push(`Residential Address,${escapeCSV(formValues.residentialAddress || 'N/A')}`)
+      rows.push(`Postal Code,${escapeCSV(formValues.postalCode || 'N/A')}`)
+      rows.push(`TFN/ABN,${escapeCSV(formValues.tfnAbn || 'N/A')}`)
+      rows.push(`ID Number,${escapeCSV(formValues.idNumber || 'N/A')}`)
+      rows.push(`Residing in Australia,${escapeCSV(formValues.residingInAu ? 'Yes' : 'No')}`)
+      if (formValues.residingInAu) {
+        rows.push(`Visa Type,${escapeCSV(formValues.visaType || 'N/A')}`)
+        rows.push(`Visa Subclass,${escapeCSV(formValues.visaSubclass || 'N/A')}`)
+      }
+      rows.push('')
+      
+      // Emergency Contact Section
+      rows.push('=== EMERGENCY CONTACT ===')
+      rows.push('Field,Value')
+      rows.push(`Full Name,${escapeCSV(formValues.emergency?.fullName || 'N/A')}`)
+      rows.push(`Relationship,${escapeCSV(formValues.emergency?.relationship || 'N/A')}`)
+      rows.push(`Phone Number,${escapeCSV(formValues.emergency?.phone || 'N/A')}`)
+      rows.push('')
+      
+      // Metrics Section
+      rows.push('=== METRICS (Based on Selected Filters) ===')
+      rows.push('Metric,Value')
+      rows.push(`Total Attendance,${attendanceMetrics.totalAttendance}`)
+      rows.push(`Completed Tasks,${attendanceMetrics.completedTasks}`)
+      rows.push(`Employee Rating,${attendanceMetrics.employeeRating !== null ? `${attendanceMetrics.employeeRating}/5` : 'N/A'}`)
+      rows.push(`Latest Clock In Time,${attendanceMetrics.latestClockInTime || 'N/A'}`)
+      rows.push('')
+      
+      // Document URLs Section
+      rows.push('=== DOCUMENT LINKS ===')
+      rows.push('Document Type,URL')
+      uploadKeys.forEach((key) => {
+        const upload = uploads[key]
+        if (upload.preview && (upload.preview.startsWith('http://') || upload.preview.startsWith('https://'))) {
+          const docName = key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1').trim()
+          rows.push(`${docName},${upload.preview}`)
+        }
+      })
+      
+      // Combine all rows
+      const csvContent = rows.join('\n')
+      
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      const url = URL.createObjectURL(blob)
+      link.setAttribute('href', url)
+      const fileName = `profile-export-${formValues.fullName?.replace(/\s+/g, '-') || 'user'}-${format(new Date(), 'yyyy-MM-dd')}.csv`
+      link.setAttribute('download', fileName)
+      link.style.visibility = 'hidden'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      toast({
+        title: 'Export successful',
+        description: 'Your profile information has been downloaded as CSV',
+      })
+    } catch (error) {
+      console.error('Error exporting profile:', error)
+      toast({
+        variant: 'destructive',
+        title: 'Export failed',
+        description: 'Failed to export profile information. Please try again.',
+      })
     }
   }
 
@@ -999,7 +1181,7 @@ const Profile: React.FC = () => {
               <CardTitle className="text-2xl">Profile Details</CardTitle>
             </div>
             <div className="flex items-center gap-4">
-              <Select defaultValue="this-year">
+              <Select value={periodFilter} onValueChange={(value) => setPeriodFilter(value as 'this-year' | 'last-year' | 'all-time')}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -1009,7 +1191,32 @@ const Profile: React.FC = () => {
                   <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="default" className="bg-green-600 hover:bg-green-700">
+              <Select value={monthFilter} onValueChange={setMonthFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Select month" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All months</SelectItem>
+                  <SelectItem value="0">January</SelectItem>
+                  <SelectItem value="1">February</SelectItem>
+                  <SelectItem value="2">March</SelectItem>
+                  <SelectItem value="3">April</SelectItem>
+                  <SelectItem value="4">May</SelectItem>
+                  <SelectItem value="5">June</SelectItem>
+                  <SelectItem value="6">July</SelectItem>
+                  <SelectItem value="7">August</SelectItem>
+                  <SelectItem value="8">September</SelectItem>
+                  <SelectItem value="9">October</SelectItem>
+                  <SelectItem value="10">November</SelectItem>
+                  <SelectItem value="11">December</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button 
+                variant="default" 
+                className="bg-green-600 hover:bg-green-700"
+                onClick={handleDownloadInfo}
+                disabled={loading || loadingMetrics}
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Download Info
               </Button>
@@ -1223,7 +1430,12 @@ const Profile: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number</Label>
-                  <Input id="phone" {...form.register('phone')} />
+                  <PhoneInput
+                    id="phone"
+                    value={form.watch('phone') || ''}
+                    onChange={(value) => form.setValue('phone', value, { shouldDirty: true })}
+                    defaultCountry="+61"
+                  />
                   {form.formState.errors.phone && <p className="text-sm text-destructive">{form.formState.errors.phone.message}</p>}
                 </div>
                 <div className="space-y-2">
@@ -1542,7 +1754,12 @@ const Profile: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="emergency-phone">Contact Number</Label>
-                  <Input id="emergency-phone" {...form.register('emergency.phone')} />
+                  <PhoneInput
+                    id="emergency-phone"
+                    value={form.watch('emergency.phone') || ''}
+                    onChange={(value) => form.setValue('emergency.phone', value, { shouldDirty: true })}
+                    defaultCountry="+61"
+                  />
                   {form.formState.errors.emergency?.phone && <p className="text-sm text-destructive">{form.formState.errors.emergency.phone.message}</p>}
                 </div>
               </CardContent>
