@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Activity, LogOut, Clock } from 'lucide-react';
+import { Activity, LogOut, Clock, AlertCircle } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -29,6 +29,7 @@ export const ActiveUsersSection = () => {
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [profilePhotos, setProfilePhotos] = useState<Record<string, string>>({});
+  const [busyStatus, setBusyStatus] = useState<Record<string, boolean>>({});
 
   const getTimeEntryData = (data: unknown): {
     userId: string;
@@ -68,6 +69,21 @@ export const ActiveUsersSection = () => {
       console.error(`Error loading profile photo for user ${userId}:`, error);
     }
     return null;
+  };
+
+  const loadBusyStatus = async (userId: string): Promise<boolean> => {
+    if (!db) return false;
+    
+    try {
+      const profileDoc = await getDoc(doc(db, 'profiles', userId));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        return Boolean(data.isBusy);
+      }
+    } catch (error) {
+      console.error(`Error loading busy status for user ${userId}:`, error);
+    }
+    return false;
   };
 
   const loadActiveUsers = async () => {
@@ -123,22 +139,25 @@ export const ActiveUsersSection = () => {
       const limitedActive = active.slice(0, 3);
       setActiveUsers(limitedActive);
 
-      // Load profile photos for active users
+      // Load profile photos and busy status for active users
       const photoPromises = limitedActive.map(async (activeUser) => {
-        const photo = await loadProfilePhoto(activeUser.userId);
-        return { userId: activeUser.userId, photo };
+        const [photo, isBusy] = await Promise.all([
+          loadProfilePhoto(activeUser.userId),
+          loadBusyStatus(activeUser.userId)
+        ]);
+        return { userId: activeUser.userId, photo, isBusy };
       });
-      const photoResults = await Promise.all(photoPromises);
+      const results = await Promise.all(photoPromises);
       const newPhotos: Record<string, string> = {};
-      photoResults.forEach(({ userId, photo }) => {
+      const newBusyStatus: Record<string, boolean> = {};
+      results.forEach(({ userId, photo, isBusy }) => {
         if (photo) {
           newPhotos[userId] = photo;
-          console.log(`Loaded profile photo for ${userId}:`, photo);
-        } else {
-          console.log(`No profile photo found for ${userId}`);
         }
+        newBusyStatus[userId] = isBusy;
       });
       setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
+      setBusyStatus(prev => ({ ...prev, ...newBusyStatus }));
     } catch (error: any) {
       console.error('Error loading active users:', error);
     }
@@ -208,9 +227,6 @@ export const ActiveUsersSection = () => {
       photoResults.forEach(({ userId, photo }) => {
         if (photo) {
           newPhotos[userId] = photo;
-          console.log(`Loaded profile photo for ${userId}:`, photo);
-        } else {
-          console.log(`No profile photo found for ${userId}`);
         }
       });
       setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
@@ -321,24 +337,30 @@ export const ActiveUsersSection = () => {
                       <p className="text-xs text-muted-foreground truncate">
                         {activeUser.userEmail}
                       </p>
-                      {isAdmin && (
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline" className="text-xs">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {formatTime(activeUser.clockInTime)}
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {busyStatus[activeUser.userId] && (
+                          <Badge variant="destructive" className="text-xs">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Busy
                           </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {Math.round(hoursActive * 100) / 100}h active
-                          </span>
-                        </div>
-                      )}
-                      {!isAdmin && (
-                        <div className="mt-1">
+                        )}
+                        {isAdmin && (
+                          <>
+                            <Badge variant="outline" className="text-xs">
+                              <Clock className="h-3 w-3 mr-1" />
+                              {formatTime(activeUser.clockInTime)}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {Math.round(hoursActive * 100) / 100}h active
+                            </span>
+                          </>
+                        )}
+                        {!isAdmin && (
                           <Badge variant="outline" className="text-xs bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-300">
                             Active
                           </Badge>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

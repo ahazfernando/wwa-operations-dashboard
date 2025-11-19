@@ -46,7 +46,9 @@ import {
   deleteField,
 } from 'firebase/firestore'
 import { format } from 'date-fns'
-import { Upload, CalendarIcon, Pencil, Download, ArrowRight, Clock, Crown, CheckSquare, Star, FileText, User, Phone, Shield } from 'lucide-react'
+import { Upload, CalendarIcon, Pencil, Download, ArrowRight, Clock, Crown, CheckSquare, Star, FileText, User, Phone, Shield, AlertCircle } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -83,6 +85,7 @@ const FormSchema = z.object({
   }).optional(),
   declaration1: z.boolean().optional(),
   declaration2: z.boolean().optional(),
+  isBusy: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (data.residingInAu && data.residingInAu === true) {
     if (data.visaType && !data.visaType.trim()) {
@@ -152,6 +155,7 @@ const Profile: React.FC = () => {
       },
       declaration1: false,
       declaration2: false,
+      isBusy: false,
     },
   })
 
@@ -292,6 +296,9 @@ const Profile: React.FC = () => {
             if (data.declaration2 !== undefined) {
               formData.declaration2 = Boolean(data.declaration2)
             }
+            if (data.isBusy !== undefined) {
+              formData.isBusy = Boolean(data.isBusy)
+            }
             
             // Set email from Firebase Auth user if not in profile data
             if (!data.email && user.email) {
@@ -325,6 +332,7 @@ const Profile: React.FC = () => {
               },
               declaration1: formData.declaration1 || false,
               declaration2: formData.declaration2 || false,
+              isBusy: formData.isBusy || false,
             })
             
             // Set upload previews
@@ -1307,6 +1315,35 @@ const Profile: React.FC = () => {
                   <p className="text-sm text-muted-foreground mb-1">Email Address</p>
                   <p className="font-medium">{form.watch('email') || 'Not specified'}</p>
                 </div>
+              </div>
+              <div className="flex items-center gap-3 mt-4">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="isBusy"
+                    checked={form.watch('isBusy') || false}
+                    onCheckedChange={(checked) => {
+                      form.setValue('isBusy', checked, { shouldDirty: true });
+                      // Auto-save busy status immediately
+                      if (currentUser) {
+                        setDoc(doc(db, 'profiles', currentUser.uid), {
+                          isBusy: checked,
+                          updatedAt: new Date().toISOString(),
+                        }, { merge: true }).catch((error) => {
+                          console.error('Error saving busy status:', error);
+                        });
+                      }
+                    }}
+                  />
+                  <Label htmlFor="isBusy" className="text-sm font-medium cursor-pointer">
+                    Mark as Busy
+                  </Label>
+                </div>
+                {form.watch('isBusy') && (
+                  <Badge variant="destructive" className="text-xs">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    Busy
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
