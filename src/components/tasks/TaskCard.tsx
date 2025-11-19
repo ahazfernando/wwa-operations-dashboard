@@ -47,7 +47,8 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
     }
 
     // Validate that actualKpi is filled before allowing status change to Complete
-    if (newStatus === 'Complete' && (!task.actualKpi || task.actualKpi.trim() === '')) {
+    // Skip this check for collaborative tasks as they have their own completion logic
+    if (newStatus === 'Complete' && !task.collaborative && (!task.actualKpi || task.actualKpi.trim() === '')) {
       toast({
         title: 'Cannot complete task',
         description: 'Please fill in the Actual KPI before completing the task',
@@ -62,10 +63,27 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
         changedBy: user?.id,
         changedByName: user?.name,
       });
-      toast({
-        title: 'Status updated',
-        description: `Task status changed to ${newStatus}`,
-      });
+      
+      // Show appropriate message for collaborative tasks
+      if (task.collaborative && newStatus === 'Complete') {
+        const userCompleted = task.completedBy?.some(entry => entry.userId === user?.id);
+        if (!userCompleted) {
+          toast({
+            title: 'Your part completed',
+            description: 'You have marked your part as complete. The task will be fully completed when all members finish.',
+          });
+        } else {
+          toast({
+            title: 'Status updated',
+            description: `Task status changed to ${newStatus}`,
+          });
+        }
+      } else {
+        toast({
+          title: 'Status updated',
+          description: `Task status changed to ${newStatus}`,
+        });
+      }
       onStatusChange?.();
     } catch (error: any) {
       toast({

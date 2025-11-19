@@ -67,6 +67,8 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     statusHistory: statusHistory.length > 0 ? statusHistory : undefined,
     recurring: docData.recurring || false,
     recurringFrequency: docData.recurringFrequency || undefined,
+    recurringStartDate: docData.recurringStartDate?.toDate() || undefined,
+    recurringEndDate: docData.recurringEndDate?.toDate() || undefined,
     parentTaskId: docData.parentTaskId || undefined,
     collaborative: docData.collaborative || false,
     completedBy: completedBy.length > 0 ? completedBy : undefined,
@@ -84,6 +86,7 @@ export async function createTask(taskData: {
   assignedMembers: string[];
   assignedMemberNames: string[];
   images: (string | TaskImage)[];
+  files?: (string | TaskFile)[];
   expectedKpi?: string;
   actualKpi?: string;
   eta?: Date;
@@ -92,6 +95,8 @@ export async function createTask(taskData: {
   createdByName: string;
   recurring?: boolean;
   recurringFrequency?: string[];
+  recurringStartDate?: Date;
+  recurringEndDate?: Date;
   parentTaskId?: string;
   collaborative?: boolean;
 }): Promise<string> {
@@ -108,6 +113,7 @@ export async function createTask(taskData: {
     }];
 
     const sanitizedImages = sanitizeImages(taskData.images);
+    const sanitizedFiles = taskData.files ? sanitizeFiles(taskData.files) : null;
     const docRef = await addDoc(collection(db, 'tasks'), {
       taskId: taskData.taskId,
       name: taskData.name,
@@ -117,6 +123,7 @@ export async function createTask(taskData: {
       assignedMembers: taskData.assignedMembers,
       assignedMemberNames: taskData.assignedMemberNames,
       images: sanitizedImages,
+      files: sanitizedFiles,
       expectedKpi: taskData.expectedKpi || '',
       actualKpi: taskData.actualKpi || '',
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
@@ -128,6 +135,8 @@ export async function createTask(taskData: {
       statusHistory: initialStatusHistory,
       recurring: taskData.recurring || false,
       recurringFrequency: taskData.recurringFrequency || null,
+      recurringStartDate: taskData.recurringStartDate ? Timestamp.fromDate(taskData.recurringStartDate) : null,
+      recurringEndDate: taskData.recurringEndDate ? Timestamp.fromDate(taskData.recurringEndDate) : null,
       parentTaskId: taskData.parentTaskId || null,
       collaborative: taskData.collaborative || false,
       completedBy: [],
@@ -295,6 +304,14 @@ export async function updateTaskStatus(
             ? (currentData.eta.toDate ? currentData.eta.toDate() : new Date(currentData.eta))
             : undefined;
           
+          const recurringStartDate = currentData.recurringStartDate
+            ? (currentData.recurringStartDate.toDate ? currentData.recurringStartDate.toDate() : new Date(currentData.recurringStartDate))
+            : undefined;
+          
+          const recurringEndDate = currentData.recurringEndDate
+            ? (currentData.recurringEndDate.toDate ? currentData.recurringEndDate.toDate() : new Date(currentData.recurringEndDate))
+            : undefined;
+          
           // Create new task with same scope but new ID and current date
           const newTaskData = {
             taskId: newTaskId,
@@ -312,6 +329,8 @@ export async function updateTaskStatus(
             createdByName: options?.changedByName || currentData.createdByName,
             recurring: true, // Keep it as recurring
             recurringFrequency: currentData.recurringFrequency || undefined,
+            recurringStartDate: recurringStartDate,
+            recurringEndDate: recurringEndDate,
             parentTaskId: parentId, // Link to the original recurring task
             collaborative: currentData.collaborative || false,
           };

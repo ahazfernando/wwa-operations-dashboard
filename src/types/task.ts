@@ -46,6 +46,8 @@ export interface Task {
   statusHistory?: StatusChange[]; // History of status changes
   recurring?: boolean; // Whether this task should recur when completed
   recurringFrequency?: string[]; // Array of day names (Monday, Tuesday, etc.) or ['all'] for all days
+  recurringStartDate?: Date; // Start date for recurring task
+  recurringEndDate?: Date; // End date for recurring task
   parentTaskId?: string; // ID of the original recurring task (for tracking recurring instances)
   collaborative?: boolean; // Whether this is a collaborative task requiring all members to complete
   completedBy?: CompletedBy[]; // Array of users who have completed this collaborative task
@@ -78,6 +80,8 @@ export interface FirestoreTask {
   }>;
   recurring?: boolean;
   recurringFrequency?: string[]; // Array of day names or ['all'] for all days
+  recurringStartDate?: any; // Firestore Timestamp
+  recurringEndDate?: any; // Firestore Timestamp
   parentTaskId?: string;
   collaborative?: boolean;
   completedBy?: Array<{

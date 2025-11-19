@@ -15,8 +15,10 @@ import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, FileText, ChevronDown, Upload, Clock, Repeat, Search } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
 
 interface User {
   id: string;
@@ -48,40 +50,44 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     time: '09:00',
     recurring: false,
     recurringFrequency: [] as string[], // Array of day names or ['all'] for all days
+    recurringDateRange: undefined as { from: Date; to?: Date } | undefined,
     collaborative: false,
   });
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedImageFiles, setSelectedImageFiles] = useState<File[]>([]);
+  const [selectedDocumentFiles, setSelectedDocumentFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
 
   // Reset ETA to current date when dialog opens
   useEffect(() => {
     if (open) {
-      setFormData(prev => ({ ...prev, eta: new Date() }));
+      setFormData(prev => ({ ...prev, eta: new Date(), recurringDateRange: undefined }));
+    } else {
+      // Reset file selections when dialog closes
+      setSelectedImageFiles([]);
+      setSelectedDocumentFiles([]);
+      setImagePreviews([]);
     }
   }, [open]);
 
-  const validateAndAddFiles = (files: File[]) => {
+  const validateAndAddImages = (files: File[]) => {
     if (files.length === 0) return;
 
-    // Validate file types - allow images and PDFs
-    const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    const validPdfTypes = ['application/pdf'];
-    const validTypes = [...validImageTypes, ...validPdfTypes];
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     const invalidFiles = files.filter(file => !validTypes.includes(file.type));
-    
+
     if (invalidFiles.length > 0) {
       toast({
         title: 'Invalid file type',
-        description: 'Please upload only image files (JPEG, PNG, GIF, WebP) or PDF documents',
+        description: 'Please upload only image files (JPEG, PNG, GIF, WebP)',
         variant: 'destructive',
       });
       return;
     }
 
-    // Validate file sizes (max 5MB per file)
     const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
     if (largeFiles.length > 0) {
       toast({
@@ -93,37 +99,74 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     }
 
     // Check total file limit (max 2 files)
-    const totalFiles = selectedFiles.length + files.length;
+    const totalFiles = selectedImageFiles.length + files.length;
     if (totalFiles > 2) {
       toast({
         title: 'Too many files',
-        description: 'Maximum 2 files allowed',
+        description: 'Maximum 2 image files allowed',
         variant: 'destructive',
       });
       return;
     }
 
-    setSelectedFiles(prev => [...prev, ...files]);
-    
-    // Create previews for image files only
+    setSelectedImageFiles(prev => [...prev, ...files]);
+
     files.forEach(file => {
-      // Only create image previews for image files
-      if (validImageTypes.includes(file.type)) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImagePreviews(prev => [...prev, reader.result as string]);
-        };
-        reader.readAsDataURL(file);
-      } else {
-        // For PDFs, add empty string to maintain index alignment
-        setImagePreviews(prev => [...prev, '']);
-      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreviews(prev => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
     });
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const validateAndAddDocumentFiles = (files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['application/pdf'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only PDF files',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check total file limit (max 2 files)
+    const totalFiles = selectedDocumentFiles.length + files.length;
+    if (totalFiles > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 document files allowed',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSelectedDocumentFiles(prev => [...prev, ...files]);
+  };
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    validateAndAddFiles(files);
+    validateAndAddImages(files);
+  };
+
+  const handleDocumentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    validateAndAddDocumentFiles(files);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -144,12 +187,37 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     setIsDragging(false);
 
     const files = Array.from(e.dataTransfer.files);
-    validateAndAddFiles(files);
+    validateAndAddImages(files);
+  };
+
+  const handleDragOverFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(true);
+  };
+
+  const handleDragLeaveFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+  };
+
+  const handleDropFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    validateAndAddDocumentFiles(files);
   };
 
   const removeImage = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    setSelectedImageFiles(prev => prev.filter((_, i) => i !== index));
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const removeDocumentFile = (index: number) => {
+    setSelectedDocumentFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleMemberToggle = (userId: string) => {
@@ -186,21 +254,30 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
       setLoading(true);
       setUploadingImages(true);
 
-      // Upload files to Cloudinary (images and PDFs)
+      // Upload images to Cloudinary
       const uploadedImages: string[] = [];
-      const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
       
-      for (const file of selectedFiles) {
+      for (const file of selectedImageFiles) {
         try {
-          let result;
-          // Use appropriate upload function based on file type
-          if (validImageTypes.includes(file.type)) {
-            result = await uploadImageToCloudinary(file);
-          } else {
-            // PDFs and other documents
-            result = await uploadFileToCloudinary(file);
-          }
+          const result = await uploadImageToCloudinary(file);
           uploadedImages.push(result.url);
+        } catch (error: any) {
+          console.error('Error uploading image:', error);
+          toast({
+            title: 'Image upload failed',
+            description: `Failed to upload ${file.name}. Continuing with other files...`,
+            variant: 'destructive',
+          });
+        }
+      }
+
+      // Upload document files to Cloudinary
+      const uploadedFiles: Array<{ url: string; name: string }> = [];
+      
+      for (const file of selectedDocumentFiles) {
+        try {
+          const result = await uploadFileToCloudinary(file);
+          uploadedFiles.push({ url: result.url, name: file.name });
         } catch (error: any) {
           console.error('Error uploading file:', error);
           toast({
@@ -231,6 +308,29 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         return;
       }
 
+      // Validate recurring date range if recurring is enabled
+      if (formData.recurring && (!formData.recurringDateRange || !formData.recurringDateRange.from)) {
+        toast({
+          title: 'Validation error',
+          description: 'Please select a date range for the recurring task',
+          variant: 'destructive',
+        });
+        setLoading(false);
+        setUploadingImages(false);
+        return;
+      }
+
+      if (formData.recurring && formData.recurringDateRange && !formData.recurringDateRange.to) {
+        toast({
+          title: 'Validation error',
+          description: 'Please select an end date for the recurring task',
+          variant: 'destructive',
+        });
+        setLoading(false);
+        setUploadingImages(false);
+        return;
+      }
+
       // Create task
       await createTask({
         taskId: formData.taskId.trim(),
@@ -240,6 +340,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         assignedMembers: formData.assignedMembers,
         assignedMemberNames,
         images: uploadedImages,
+        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
         expectedKpi: formData.expectedKpi.trim() || undefined,
         actualKpi: formData.actualKpi.trim() || undefined,
         eta: formData.eta,
@@ -248,6 +349,8 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         createdByName: user?.name || '',
         recurring: formData.recurring,
         recurringFrequency: formData.recurring ? formData.recurringFrequency : undefined,
+        recurringStartDate: formData.recurring && formData.recurringDateRange?.from ? formData.recurringDateRange.from : undefined,
+        recurringEndDate: formData.recurring && formData.recurringDateRange?.to ? formData.recurringDateRange.to : undefined,
         collaborative: formData.collaborative,
       });
 
@@ -270,9 +373,11 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         time: '09:00',
         recurring: false,
         recurringFrequency: [],
+        recurringDateRange: undefined,
         collaborative: false,
       });
-      setSelectedFiles([]);
+      setSelectedImageFiles([]);
+      setSelectedDocumentFiles([]);
       setImagePreviews([]);
       setMemberSearchQuery('');
       setOpen(false);
@@ -297,14 +402,54 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           Create Task
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Create New Task</DialogTitle>
-          <DialogDescription>
-            Create a new task and assign it to team members
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <DialogContent 
+        className="max-w-5xl max-h-[90vh] overflow-hidden p-0 !grid-cols-1 gap-0 !bg-transparent"
+        style={{ backgroundColor: 'transparent' }}
+      >
+        <div className="grid md:grid-cols-2 grid-cols-1 w-full border rounded-lg overflow-hidden">
+          {/* Left side with background image and logo */}
+          <div className="relative hidden md:block overflow-hidden min-h-[600px] flex flex-col">
+            <div className="absolute inset-0 z-0">
+              <Image
+                src="/modalimages/eed0e449f25f0b6ea226cd6039f6a135.jpg"
+                alt="Task modal background"
+                fill
+                className="object-cover"
+                priority
+              />
+            </div>
+            <div className="relative z-10 h-full flex flex-col justify-between p-8">
+              {/* Logo at top left */}
+              <div>
+                <Image
+                  src="/logos/WWA - White (1).png"
+                  alt="We Will Australia Logo"
+                  width={120}
+                  height={120}
+                  className="object-contain"
+                  priority
+                />
+              </div>
+              {/* Title and content at bottom */}
+              <div className="text-white space-y-2">
+                <h2 className="text-2xl font-bold">Create New Task</h2>
+                <p className="text-sm text-white/80">
+                  Create a new task and assign it to team members. Fill in the task details below to get started.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right side with form content */}
+          <div className="relative bg-background rounded-r-lg overflow-y-auto max-h-[90vh]">
+            <div className="p-6">
+              <DialogHeader>
+                <DialogTitle className="text-2xl">Create New Task</DialogTitle>
+                <DialogDescription>
+                  Create a new task and assign it to team members. Fill in the task details below to get started.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-4 mt-6">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="taskId">Task ID *</Label>
@@ -365,25 +510,14 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="expectedKpi">Expected KPI</Label>
-              <Input
-                id="expectedKpi"
-                placeholder="e.g., 95% completion rate"
-                value={formData.expectedKpi}
-                onChange={(e) => setFormData(prev => ({ ...prev, expectedKpi: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="actualKpi">Actual KPI</Label>
-              <Input
-                id="actualKpi"
-                placeholder="e.g., 92% completion rate"
-                value={formData.actualKpi}
-                onChange={(e) => setFormData(prev => ({ ...prev, actualKpi: e.target.value }))}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="expectedKpi">Expected KPI</Label>
+            <Input
+              id="expectedKpi"
+              placeholder="e.g., 95% completion rate"
+              value={formData.expectedKpi}
+              onChange={(e) => setFormData(prev => ({ ...prev, expectedKpi: e.target.value }))}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -486,63 +620,119 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           </div>
 
           {formData.recurring && (
-            <div className="space-y-2">
-              <Label htmlFor="recurringFrequency">Recurring Frequency *</Label>
-              <Select
-                value={formData.recurringFrequency.includes('all') ? 'all' : formData.recurringFrequency.length > 0 ? 'custom' : 'custom'}
-                onValueChange={(value) => {
-                  if (value === 'all') {
-                    setFormData(prev => ({ ...prev, recurringFrequency: ['all'] }));
-                  } else {
-                    // When "Select Days" is chosen, keep existing selections or start with empty array
-                    setFormData(prev => ({ 
-                      ...prev, 
-                      recurringFrequency: prev.recurringFrequency.includes('all') ? [] : prev.recurringFrequency
-                    }));
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select frequency" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Days</SelectItem>
-                  <SelectItem value="custom">Select Days</SelectItem>
-                </SelectContent>
-              </Select>
-              {!formData.recurringFrequency.includes('all') && (
-                <div className="space-y-2 mt-2">
-                  <Label className="text-sm text-muted-foreground">Select specific days:</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
-                      <div key={day} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`day-${day}`}
-                          checked={formData.recurringFrequency.includes(day)}
-                          onCheckedChange={(checked) => {
-                            setFormData(prev => ({
-                              ...prev,
-                              recurringFrequency: checked
-                                ? [...prev.recurringFrequency, day]
-                                : prev.recurringFrequency.filter(d => d !== day)
-                            }));
-                          }}
-                        />
-                        <label
-                          htmlFor={`day-${day}`}
-                          className="text-sm font-medium leading-none cursor-pointer"
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="recurringDateRange">Recurring Date Range *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !formData.recurringDateRange?.from && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formData.recurringDateRange?.from ? (
+                        formData.recurringDateRange.to ? (
+                          <>
+                            {format(formData.recurringDateRange.from, "LLL dd, y")} -{" "}
+                            {format(formData.recurringDateRange.to, "LLL dd, y")}
+                          </>
+                        ) : (
+                          format(formData.recurringDateRange.from, "LLL dd, y")
+                        )
+                      ) : (
+                        <span>Select date range</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="range"
+                      defaultMonth={formData.recurringDateRange?.from}
+                      selected={formData.recurringDateRange}
+                      onSelect={(range) => setFormData(prev => ({ ...prev, recurringDateRange: range }))}
+                      numberOfMonths={2}
+                      initialFocus
+                    />
+                    {formData.recurringDateRange && (
+                      <div className="p-3 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => setFormData(prev => ({ ...prev, recurringDateRange: undefined }))}
                         >
-                          {day}
-                        </label>
+                          Clear date range
+                        </Button>
                       </div>
-                    ))}
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <p className="text-xs text-muted-foreground">
+                  Select when the recurring task should start and end
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="recurringFrequency">Recurring Frequency *</Label>
+                <Select
+                  value={formData.recurringFrequency.includes('all') ? 'all' : formData.recurringFrequency.length > 0 ? 'custom' : 'custom'}
+                  onValueChange={(value) => {
+                    if (value === 'all') {
+                      setFormData(prev => ({ ...prev, recurringFrequency: ['all'] }));
+                    } else {
+                      // When "Select Days" is chosen, keep existing selections or start with empty array
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        recurringFrequency: prev.recurringFrequency.includes('all') ? [] : prev.recurringFrequency
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select frequency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Days</SelectItem>
+                    <SelectItem value="custom">Select Days</SelectItem>
+                  </SelectContent>
+                </Select>
+                {!formData.recurringFrequency.includes('all') && (
+                  <div className="space-y-2 mt-2">
+                    <Label className="text-sm text-muted-foreground">Select specific days:</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                        <div key={day} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`day-${day}`}
+                            checked={formData.recurringFrequency.includes(day)}
+                            onCheckedChange={(checked) => {
+                              setFormData(prev => ({
+                                ...prev,
+                                recurringFrequency: checked
+                                  ? [...prev.recurringFrequency, day]
+                                  : prev.recurringFrequency.filter(d => d !== day)
+                              }));
+                            }}
+                          />
+                          <label
+                            htmlFor={`day-${day}`}
+                            className="text-sm font-medium leading-none cursor-pointer"
+                          >
+                            {day}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                    {formData.recurringFrequency.length === 0 && (
+                      <p className="text-xs text-muted-foreground">Please select at least one day or choose 'All Days'</p>
+                    )}
                   </div>
-                  {formData.recurringFrequency.length === 0 && (
-                    <p className="text-xs text-muted-foreground">Please select at least one day or choose 'All Days'</p>
-                  )}
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            </>
           )}
 
           <div className="space-y-2">
@@ -641,86 +831,159 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           </div>
 
           <div className="space-y-2">
-            <Label>Files</Label>
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={cn(
-                "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
-                isDragging
-                  ? "border-primary bg-primary/10"
-                  : "border-muted-foreground/25 hover:border-muted-foreground/50"
-              )}
-              onClick={() => document.getElementById('files-input')?.click()}
-            >
-              <input
-                id="files-input"
-                type="file"
-                accept="image/*,application/pdf"
-                multiple
-                onChange={handleFileSelect}
-                disabled={uploadingImages}
-                className="hidden"
-              />
-              <div className="flex flex-col items-center gap-3">
-                <div className="rounded-full border-2 border-muted-foreground/50 p-3">
-                  <Upload className="h-6 w-6 text-muted-foreground" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">Drag & drop files here</p>
-                  <p className="text-xs text-muted-foreground">
-                    Or click to browse (max 2 files, up to 5MB each) - Images or PDFs
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    document.getElementById('files-input')?.click();
-                  }}
-                  disabled={uploadingImages}
+            <Label>Attachments</Label>
+            <Tabs defaultValue="images" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="images">
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Images
+                </TabsTrigger>
+                <TabsTrigger value="files">
+                  <FileText className="h-4 w-4 mr-2" />
+                  Files
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="images" className="space-y-4">
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={cn(
+                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                    isDragging
+                      ? "border-primary bg-primary/10"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  )}
+                  onClick={() => document.getElementById('images-input')?.click()}
                 >
-                  Browse files
-                </Button>
-              </div>
-            </div>
-            {selectedFiles.length > 0 && (
-              <div className="grid grid-cols-4 gap-2 mt-2">
-                {selectedFiles.map((file, index) => {
-                  const isImage = file.type.startsWith('image/');
-                  const isPdf = file.type === 'application/pdf';
-                  
-                  return (
-                    <div key={index} className="relative group">
-                      {isImage && imagePreviews[index] ? (
+                  <input
+                    id="images-input"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageFileSelect}
+                    disabled={uploadingImages}
+                    className="hidden"
+                  />
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="rounded-full border-2 border-muted-foreground/50 p-3">
+                      <Upload className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Drag & drop images here</p>
+                      <p className="text-xs text-muted-foreground">
+                        Or click to browse (max 2 files, up to 5MB each)
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        document.getElementById('images-input')?.click();
+                      }}
+                      disabled={uploadingImages}
+                    >
+                      Browse images
+                    </Button>
+                  </div>
+                </div>
+                {imagePreviews.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2 mt-2">
+                    {imagePreviews.map((preview, index) => (
+                      <div key={index} className="relative group">
                         <img
-                          src={imagePreviews[index]}
+                          src={preview}
                           alt={`Preview ${index + 1}`}
                           className="w-full h-20 object-cover rounded"
                         />
-                      ) : isPdf ? (
-                        <div className="w-full h-20 bg-muted rounded flex flex-col items-center justify-center gap-1">
-                          <FileText className="h-8 w-8 text-muted-foreground" />
-                          <span className="text-xs text-muted-foreground truncate px-1 max-w-full">
-                            {file.name}
-                          </span>
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => removeImage(index)}
-                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => removeImage(index)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="files" className="space-y-4">
+                <div
+                  onDragOver={handleDragOverFiles}
+                  onDragLeave={handleDragLeaveFiles}
+                  onDrop={handleDropFiles}
+                  className={cn(
+                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                    isDraggingFiles
+                      ? "border-primary bg-primary/10"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  )}
+                  onClick={() => document.getElementById('files-input')?.click()}
+                >
+                  <input
+                    id="files-input"
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    onChange={handleDocumentFileSelect}
+                    disabled={uploadingImages}
+                    className="hidden"
+                  />
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="rounded-full border-2 border-muted-foreground/50 p-3">
+                      <Upload className="h-6 w-6 text-muted-foreground" />
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Drag & drop PDF files here</p>
+                      <p className="text-xs text-muted-foreground">
+                        Or click to browse (max 2 files, up to 5MB each)
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        document.getElementById('files-input')?.click();
+                      }}
+                      disabled={uploadingImages}
+                    >
+                      Browse files
+                    </Button>
+                  </div>
+                </div>
+                {selectedDocumentFiles.length > 0 && (
+                  <div className="space-y-2 mt-2">
+                    {selectedDocumentFiles.map((file, index) => (
+                      <div key={index} className="relative group p-4 border rounded-lg bg-muted/50">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-8 w-8 text-muted-foreground" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{file.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {(file.size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeDocumentFile(index)}
+                            className="bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
@@ -744,6 +1007,9 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
             </Button>
           </div>
         </form>
+            </div>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

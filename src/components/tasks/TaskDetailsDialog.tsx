@@ -38,6 +38,7 @@ import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as Ima
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import Image from 'next/image';
 
 interface User {
   id: string;
@@ -473,7 +474,8 @@ export function TaskDetailsDialog({
     if (!task) return;
 
     // Validate that actualKpi is filled before allowing status change to Complete
-    if (newStatus === 'Complete') {
+    // Skip this check for collaborative tasks as they have their own completion logic
+    if (newStatus === 'Complete' && !task.collaborative) {
       const currentActualKpi = task.actualKpi?.trim() || '';
       if (!currentActualKpi) {
         toast({
@@ -491,10 +493,27 @@ export function TaskDetailsDialog({
         changedByName: user?.name,
       });
       setFormData(prev => ({ ...prev, status: newStatus }));
-      toast({
-        title: 'Status updated',
-        description: `Task status changed to ${newStatus}`,
-      });
+      
+      // Show appropriate message for collaborative tasks
+      if (task.collaborative && newStatus === 'Complete') {
+        const userCompleted = task.completedBy?.some(entry => entry.userId === user?.id);
+        if (!userCompleted) {
+          toast({
+            title: 'Your part completed',
+            description: 'You have marked your part as complete. The task will be fully completed when all members finish and Actual KPI is filled.',
+          });
+        } else {
+          toast({
+            title: 'Status updated',
+            description: `Task status changed to ${newStatus}`,
+          });
+        }
+      } else {
+        toast({
+          title: 'Status updated',
+          description: `Task status changed to ${newStatus}`,
+        });
+      }
       onTaskUpdated?.();
     } catch (error: any) {
       toast({
@@ -584,6 +603,8 @@ export function TaskDetailsDialog({
         createdByName: user?.name || '',
         recurring: task.recurring || false,
         recurringFrequency: task.recurringFrequency || undefined,
+        recurringStartDate: task.recurringStartDate,
+        recurringEndDate: task.recurringEndDate,
         collaborative: task.collaborative || false,
       });
 
@@ -608,17 +629,45 @@ export function TaskDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <div>
-            <DialogTitle className="text-2xl">Task Details</DialogTitle>
-            <DialogDescription>
-              View and manage task information
-            </DialogDescription>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden p-0">
+        <div className="grid md:grid-cols-2 grid-cols-1 w-full h-full">
+          {/* Left side with background image and logo */}
+          <div className="relative hidden md:block rounded-l-lg overflow-hidden bg-white dark:bg-black">
+            <div className="absolute inset-0">
+              <Image
+                src="/modalimages/taskmodalglass.jpg"
+                alt="Task modal background"
+                fill
+                className="object-cover"
+                priority
+              />
+            </div>
+            <div className="absolute inset-0 bg-background/30 backdrop-blur-sm" />
+            <div className="relative z-10 h-full flex items-center justify-center p-8 min-h-[500px]">
+              <Image
+                src="/logos/WWA - White (1).png"
+                alt="We Will Australia Logo"
+                width={160}
+                height={180}
+                className="object-contain"
+                priority
+              />
+            </div>
           </div>
-        </DialogHeader>
 
-        <div className="space-y-6">
+          {/* Right side with content */}
+          <div className="relative bg-background rounded-r-lg overflow-y-auto max-h-[90vh]">
+            <div className="p-6">
+              <DialogHeader>
+                <div>
+                  <DialogTitle className="text-2xl">Task Details</DialogTitle>
+                  <DialogDescription>
+                    View and manage task information
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+
+              <div className="space-y-6">
           {/* Task ID and Status */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1643,6 +1692,9 @@ export function TaskDetailsDialog({
               </Button>
             </div>
           )}
+              </div>
+            </div>
+          </div>
         </div>
       </DialogContent>
 

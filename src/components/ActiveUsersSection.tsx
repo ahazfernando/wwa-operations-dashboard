@@ -5,9 +5,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Activity, LogOut, Clock } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { ActiveUser } from '@/components/clock/types';
 import { formatTime } from '@/components/clock/utils';
@@ -27,6 +28,7 @@ export const ActiveUsersSection = () => {
   const [recentClockOuts, setRecentClockOuts] = useState<RecentClockOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [profilePhotos, setProfilePhotos] = useState<Record<string, string>>({});
 
   const getTimeEntryData = (data: unknown): {
     userId: string;
@@ -51,6 +53,21 @@ export const ActiveUsersSection = () => {
       createdAt: Timestamp;
       updatedAt: Timestamp;
     };
+  };
+
+  const loadProfilePhoto = async (userId: string): Promise<string | null> => {
+    if (!db) return null;
+    
+    try {
+      const profileDoc = await getDoc(doc(db, 'profiles', userId));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        return data.profilePhoto || null;
+      }
+    } catch (error) {
+      console.error(`Error loading profile photo for user ${userId}:`, error);
+    }
+    return null;
   };
 
   const loadActiveUsers = async () => {
@@ -103,7 +120,25 @@ export const ActiveUsersSection = () => {
 
       // Sort by clock in time (most recent first) and limit to 3
       active.sort((a, b) => b.clockInTime.getTime() - a.clockInTime.getTime());
-      setActiveUsers(active.slice(0, 3));
+      const limitedActive = active.slice(0, 3);
+      setActiveUsers(limitedActive);
+
+      // Load profile photos for active users
+      const photoPromises = limitedActive.map(async (activeUser) => {
+        const photo = await loadProfilePhoto(activeUser.userId);
+        return { userId: activeUser.userId, photo };
+      });
+      const photoResults = await Promise.all(photoPromises);
+      const newPhotos: Record<string, string> = {};
+      photoResults.forEach(({ userId, photo }) => {
+        if (photo) {
+          newPhotos[userId] = photo;
+          console.log(`Loaded profile photo for ${userId}:`, photo);
+        } else {
+          console.log(`No profile photo found for ${userId}`);
+        }
+      });
+      setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
     } catch (error: any) {
       console.error('Error loading active users:', error);
     }
@@ -160,7 +195,25 @@ export const ActiveUsersSection = () => {
 
       // Sort by clock out time (most recent first) and limit to 3
       recent.sort((a, b) => b.clockOutTime.getTime() - a.clockOutTime.getTime());
-      setRecentClockOuts(recent.slice(0, 3));
+      const limitedRecent = recent.slice(0, 3);
+      setRecentClockOuts(limitedRecent);
+
+      // Load profile photos for recent clock outs
+      const photoPromises = limitedRecent.map(async (recentUser) => {
+        const photo = await loadProfilePhoto(recentUser.userId);
+        return { userId: recentUser.userId, photo };
+      });
+      const photoResults = await Promise.all(photoPromises);
+      const newPhotos: Record<string, string> = {};
+      photoResults.forEach(({ userId, photo }) => {
+        if (photo) {
+          newPhotos[userId] = photo;
+          console.log(`Loaded profile photo for ${userId}:`, photo);
+        } else {
+          console.log(`No profile photo found for ${userId}`);
+        }
+      });
+      setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
     } catch (error: any) {
       console.error('Error loading recent clock outs:', error);
     }
@@ -198,6 +251,15 @@ export const ActiveUsersSection = () => {
   }, [user]);
 
   const isAdmin = user?.role === 'admin';
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -240,9 +302,16 @@ export const ActiveUsersSection = () => {
                     className="flex items-center gap-3 p-3 border rounded-lg bg-green-50 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30 transition-colors"
                   >
                     <div className="relative">
-                      <div className="h-10 w-10 rounded-full bg-green-500 flex items-center justify-center text-white font-medium">
-                        {activeUser.userName.charAt(0).toUpperCase()}
-                      </div>
+                      <Avatar className="h-10 w-10 border-2 border-green-500">
+                        <AvatarImage 
+                          src={profilePhotos[activeUser.userId] || undefined} 
+                          alt={activeUser.userName}
+                          className="object-cover"
+                        />
+                        <AvatarFallback className="bg-green-500 text-white font-medium">
+                          {getInitials(activeUser.userName)}
+                        </AvatarFallback>
+                      </Avatar>
                       <div className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 animate-pulse" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -317,9 +386,16 @@ export const ActiveUsersSection = () => {
                     key={recent.entryId}
                     className="flex items-center gap-3 p-3 border rounded-lg hover:bg-accent transition-colors"
                   >
-                    <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                      {recent.userName.charAt(0).toUpperCase()}
-                    </div>
+                    <Avatar className="h-10 w-10 border-2 border-blue-500">
+                      <AvatarImage 
+                        src={profilePhotos[recent.userId] || undefined} 
+                        alt={recent.userName}
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="bg-blue-500 text-white font-medium">
+                        {getInitials(recent.userName)}
+                      </AvatarFallback>
+                    </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">
                         {recent.userName}

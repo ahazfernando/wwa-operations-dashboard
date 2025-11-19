@@ -13,8 +13,10 @@ import { Check, X, Upload, FileText, Download, Search, History } from 'lucide-re
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
+import { UserProfileViewDialog } from '@/components/UserProfileViewDialog';
+import { CheckCircle2, XCircle } from 'lucide-react';
 
 const Settings = () => {
   const { approveUser, rejectUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
@@ -95,6 +97,39 @@ const Settings = () => {
     }
   };
 
+  const checkProfileCompletion = async (userId: string): Promise<boolean> => {
+    if (!db) return false;
+    
+    try {
+      const profileDoc = await getDoc(doc(db, 'profiles', userId));
+      if (!profileDoc.exists()) {
+        return false;
+      }
+      
+      const profileData = profileDoc.data();
+      
+      // Check if essential fields are filled
+      const hasEssentialInfo = !!(
+        profileData.fullName || profileData.preferredName ||
+        profileData.email || profileData.phone
+      );
+      
+      // Check if required documents are uploaded
+      const hasRequiredDocs = !!(
+        profileData.idFrontPhoto || 
+        profileData.idBackPhoto ||
+        profileData.selfiePhoto ||
+        profileData.passportPhoto
+      );
+      
+      // Profile is considered complete if it has essential info and at least some documents
+      return hasEssentialInfo && hasRequiredDocs;
+    } catch (error) {
+      console.error(`Error checking profile for user ${userId}:`, error);
+      return false;
+    }
+  };
+
   const loadAllUsers = async () => {
     try {
       setUsersLoading(true);
@@ -106,6 +141,33 @@ const Settings = () => {
         return bDate.getTime() - aDate.getTime();
       });
       setAllUsers(sortedUsers);
+      
+      // Load profile completion status for all users in parallel
+      const statusMap: Record<string, boolean> = {};
+      const loadingMap: Record<string, boolean> = {};
+      
+      // Initialize loading states
+      sortedUsers.forEach(user => {
+        loadingMap[user.id] = true;
+      });
+      setLoadingProfileStatus(loadingMap);
+      
+      // Check all profiles in parallel
+      const profileChecks = sortedUsers.map(async (user) => {
+        const isComplete = await checkProfileCompletion(user.id);
+        return { userId: user.id, isComplete };
+      });
+      
+      const results = await Promise.all(profileChecks);
+      
+      // Update status map
+      results.forEach(({ userId, isComplete }) => {
+        statusMap[userId] = isComplete;
+        loadingMap[userId] = false;
+      });
+      
+      setProfileCompletionStatus(statusMap);
+      setLoadingProfileStatus(loadingMap);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -259,6 +321,10 @@ const Settings = () => {
   const [itTeamUsers, setItTeamUsers] = useState<any[]>([]);
   const [loadingItUsers, setLoadingItUsers] = useState(true);
   const [grantingPermission, setGrantingPermission] = useState(false);
+  const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
+  const [viewingProfileUserName, setViewingProfileUserName] = useState<string>('');
+  const [profileCompletionStatus, setProfileCompletionStatus] = useState<Record<string, boolean>>({});
+  const [loadingProfileStatus, setLoadingProfileStatus] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadItTeamUsers();
@@ -447,16 +513,37 @@ const Settings = () => {
                       <TableHead>Employee ID</TableHead>
                       <TableHead>Job Role</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Profile Completed</TableHead>
                       <TableHead>Registered</TableHead>
                       <TableHead>Approved By</TableHead>
                       <TableHead>Contract</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredUsers.map((user) => (
-                    <TableRow key={user.id}>
+                    {filteredUsers.map((user) => {
+                      const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+                      return (
+                    <TableRow 
+                      key={user.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={(e) => {
+                        // Don't open profile if clicking on interactive elements
+                        const target = e.target as HTMLElement;
+                        if (
+                          target.closest('button') ||
+                          target.closest('select') ||
+                          target.closest('a') ||
+                          target.closest('input') ||
+                          target.closest('[role="combobox"]')
+                        ) {
+                          return;
+                        }
+                        setViewingProfileUserId(user.id);
+                        setViewingProfileUserName(userName);
+                      }}
+                    >
                       <TableCell className="font-medium">
-                        {user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email}
+                        {userName}
                       </TableCell>
                       <TableCell>{user.employeeId || 'N/A'}</TableCell>
                       <TableCell>
@@ -493,6 +580,29 @@ const Settings = () => {
                         >
                           {user.status || 'pending'}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {loadingProfileStatus[user.id] ? (
+                          <Skeleton className="h-5 w-20" />
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            {profileCompletionStatus[user.id] ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                                  Completed
+                                </Badge>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="h-4 w-4 text-muted-foreground" />
+                                <Badge variant="secondary">
+                                  Incomplete
+                                </Badge>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDate(user.createdAt)}
@@ -552,7 +662,8 @@ const Settings = () => {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                   </TableBody>
                 </Table>
               </div>
@@ -824,6 +935,21 @@ const Settings = () => {
           <Button>Save Changes</Button>
         </CardContent>
       </Card>
+
+      {/* User Profile View Dialog */}
+      {viewingProfileUserId && (
+        <UserProfileViewDialog
+          open={!!viewingProfileUserId}
+          onOpenChange={(open) => {
+            if (!open) {
+              setViewingProfileUserId(null);
+              setViewingProfileUserName('');
+            }
+          }}
+          userId={viewingProfileUserId}
+          userName={viewingProfileUserName}
+        />
+      )}
     </div>
   );
 };

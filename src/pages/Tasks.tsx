@@ -283,7 +283,8 @@ const Tasks = () => {
       }
 
       // Validate that actualKpi is filled before allowing status change to Complete
-      if (newStatus === 'Complete' && (!task.actualKpi || task.actualKpi.trim() === '')) {
+      // Skip this check for collaborative tasks as they have their own completion logic
+      if (newStatus === 'Complete' && !task.collaborative && (!task.actualKpi || task.actualKpi.trim() === '')) {
         toast({
           title: 'Cannot complete task',
           description: 'Please fill in the Actual KPI before completing the task',
@@ -306,10 +307,26 @@ const Tasks = () => {
           changedByName: user?.name,
         });
 
-        toast({
-          title: 'Task moved',
-          description: `Task status changed to ${newStatus}`,
-        });
+        // Show appropriate message for collaborative tasks
+        if (task.collaborative && newStatus === 'Complete') {
+          const userCompleted = task.completedBy?.some(entry => entry.userId === user?.id);
+          if (!userCompleted) {
+            toast({
+              title: 'Your part completed',
+              description: 'You have marked your part as complete. The task will be fully completed when all members finish and Actual KPI is filled.',
+            });
+          } else {
+            toast({
+              title: 'Task moved',
+              description: `Task status changed to ${newStatus}`,
+            });
+          }
+        } else {
+          toast({
+            title: 'Task moved',
+            description: `Task status changed to ${newStatus}`,
+          });
+        }
       } catch (error: any) {
         // Revert on error
         setTasks(prevTasks =>
