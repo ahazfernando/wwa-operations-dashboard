@@ -8,6 +8,7 @@ import LeaveManagement from '../components/availability/Leavemanagement'
 import AvailabilityTable from '../components/availability/AvailabilityTable'
 import { useAuth } from '@/contexts/AuthContext'
 import AdminLeave from '@/components/availability/AdminLeave'
+import AvailibilitySlot from '@/components/availability/AvailibilitySlot'
 
 const Availability = () => {
     const { user, isLoading } = useAuth()
@@ -64,6 +65,7 @@ const Availability = () => {
             {user?.role === 'admin' && (
                 <>
                     <AdminLeave />
+                    <AvailibilitySlot />
                 </>
             )}
         </div>

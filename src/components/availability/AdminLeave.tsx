@@ -300,7 +300,7 @@ const AdminLeave: React.FC = () => {
 
     return (
         <>
-            <Card>
+            <Card className='h-[73vh] overflow-y-auto'>
                 <CardHeader>
                     <CardTitle>Leave Management</CardTitle>
                     <CardDescription>View, review, and manage employee leave applications.</CardDescription>
