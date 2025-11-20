@@ -292,7 +292,7 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ timeSlots }) => {
                             <div key={request.id} className="space-y-2 border-b pb-3 last:border-b-0 last:pb-0">
                                 <p className="text-sm font-medium text-foreground">
                                     {request.type === 'slot'
-                                        ? `On ${request.fromDate} from ${timeSlots[request.startSlot || 0]?.split(' - ')[0] || ''} to ${timeSlots[request.endSlot || 1]?.split(' - ')[1] || ''}`
+                                        ? `On ${request.fromDate} from ${timeSlots[request.startSlot || 0]?.split(' - ')[0] || ''} to ${timeSlots[request.endSlot || 0]?.split(' - ')[0] || ''}`
                                         : `From ${request.fromDate} to ${request.toDate}`
                                     }
                                 </p>
