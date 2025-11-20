@@ -38,7 +38,6 @@ import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as Ima
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import Image from 'next/image';
 
 interface User {
   id: string;
@@ -630,33 +629,9 @@ export function TaskDetailsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden p-0">
-        <div className="grid md:grid-cols-2 grid-cols-1 w-full h-full">
-          {/* Left side with background image and logo */}
-          <div className="relative hidden md:block rounded-l-lg overflow-hidden bg-white dark:bg-black">
-            <div className="absolute inset-0">
-              <Image
-                src="/modalimages/taskmodalglass.jpg"
-                alt="Task modal background"
-                fill
-                className="object-cover"
-                priority
-              />
-            </div>
-            <div className="absolute inset-0 bg-background/30 backdrop-blur-sm" />
-            <div className="relative z-10 h-full flex items-center justify-center p-8 min-h-[500px]">
-              <Image
-                src="/logos/WWA - White (1).png"
-                alt="We Will Australia Logo"
-                width={160}
-                height={180}
-                className="object-contain"
-                priority
-              />
-            </div>
-          </div>
-
-          {/* Right side with content */}
-          <div className="relative bg-background rounded-r-lg overflow-y-auto max-h-[90vh]">
+        <div className="w-full h-full">
+          {/* Content */}
+          <div className="relative bg-background rounded-lg overflow-y-auto max-h-[90vh]">
             <div className="p-6">
               <DialogHeader>
                 <div>
