@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle } from 'lucide-react';
+import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle, Bell, Plus } from 'lucide-react';
 import { getTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
 import { format } from 'date-fns';
@@ -201,21 +201,47 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="text-sm space-y-1">
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/clock')}
+              >
                 <Clock className="h-4 w-4" />
                 <span>Clock in/out for time tracking</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/ratings')}
+              >
                 <Star className="h-4 w-4" />
                 <span>Submit weekly ratings</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/leads')}
+              >
                 <Users className="h-4 w-4" />
                 <span>View and manage leads</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/tasks')}
+              >
                 <CheckSquare className="h-4 w-4" />
                 <span>View assigned tasks</span>
+              </p>
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/reminders')}
+              >
+                <Bell className="h-4 w-4" />
+                <span>Manage reminders</span>
+              </p>
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/reminders')}
+              >
+                <Plus className="h-4 w-4" />
+                <span>New reminder</span>
               </p>
             </div>
           </CardContent>
