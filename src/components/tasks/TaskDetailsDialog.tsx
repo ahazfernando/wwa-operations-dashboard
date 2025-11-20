@@ -30,11 +30,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { updateTask, updateTaskStatus, updateTaskImages, updateTaskFiles, deleteTask, createTask } from '@/lib/tasks';
+import { updateTask, updateTaskStatus, updateTaskImages, updateTaskFiles, updateTaskSubtasks, deleteTask, createTask } from '@/lib/tasks';
+import { Subtask } from '@/types/task';
 import { uploadImageToCloudinary, uploadFileToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search, Copy, FileText } from 'lucide-react';
+import { CalendarIcon, Loader2, Camera, X, Edit, Save, User, Clock, Image as ImageIcon, ChevronDown, Trash2, Upload, Search, Copy, FileText, Plus, CheckSquare } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -79,8 +80,8 @@ export function TaskDetailsDialog({
     date: new Date(),
     assignedMembers: [] as string[],
     status: 'New' as TaskStatus,
-    expectedKpi: '',
-    actualKpi: '',
+    expectedKpi: undefined as number | undefined,
+    actualKpi: undefined as number | undefined,
     eta: undefined as Date | undefined,
     time: '09:00',
   });
@@ -93,6 +94,11 @@ export function TaskDetailsDialog({
   const [isDragging, setIsDragging] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
+  const [newSubtaskDescription, setNewSubtaskDescription] = useState('');
+  const [subtaskImageFiles, setSubtaskImageFiles] = useState<{ [subtaskId: string]: File[] }>({});
+  const [subtaskDocumentFiles, setSubtaskDocumentFiles] = useState<{ [subtaskId: string]: File[] }>({});
+  const [subtaskImagePreviews, setSubtaskImagePreviews] = useState<{ [subtaskId: string]: string[] }>({});
+  const [uploadingSubtaskId, setUploadingSubtaskId] = useState<string | null>(null);
 
   useEffect(() => {
     if (task) {
@@ -103,8 +109,8 @@ export function TaskDetailsDialog({
         date: task.date,
         assignedMembers: task.assignedMembers,
         status: task.status,
-        expectedKpi: task.expectedKpi || '',
-        actualKpi: task.actualKpi || '',
+        expectedKpi: task.expectedKpi,
+        actualKpi: task.actualKpi,
         eta: task.eta,
         time: task.time || '09:00',
       });
@@ -132,8 +138,363 @@ export function TaskDetailsDialog({
       setIsEditing(false);
       setIsEditingActualKpi(false);
       setMemberSearchQuery('');
+      setNewSubtaskDescription('');
+      setSubtaskImageFiles({});
+      setSubtaskDocumentFiles({});
+      setSubtaskImagePreviews({});
+      setUploadingSubtaskId(null);
     }
   }, [task]);
+
+  const addSubtask = async () => {
+    if (!task || !newSubtaskDescription.trim()) {
+      toast({
+        title: 'Validation error',
+        description: 'Please enter a subtask description',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const newSubtask: Subtask = {
+      id: Date.now().toString(),
+      description: newSubtaskDescription.trim(),
+      addedAt: new Date(),
+      completed: false,
+    };
+
+    const updatedSubtasks = [...(task.subtasks || []), newSubtask];
+
+    try {
+      await updateTaskSubtasks(task.id, updatedSubtasks);
+      toast({
+        title: 'Subtask added',
+        description: 'Subtask has been added successfully',
+      });
+      setNewSubtaskDescription('');
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to add subtask',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const toggleSubtaskCompletion = async (subtaskId: string) => {
+    if (!task) return;
+
+    const updatedSubtasks = (task.subtasks || []).map(subtask => {
+      if (subtask.id === subtaskId) {
+        return {
+          ...subtask,
+          completed: !subtask.completed,
+          completedAt: !subtask.completed ? new Date() : undefined,
+        };
+      }
+      return subtask;
+    });
+
+    try {
+      await updateTaskSubtasks(task.id, updatedSubtasks);
+      toast({
+        title: 'Subtask updated',
+        description: 'Subtask completion status has been updated',
+      });
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update subtask',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const removeSubtask = async (subtaskId: string) => {
+    if (!task) return;
+
+    const updatedSubtasks = (task.subtasks || []).filter(subtask => subtask.id !== subtaskId);
+
+    try {
+      await updateTaskSubtasks(task.id, updatedSubtasks);
+      toast({
+        title: 'Subtask removed',
+        description: 'Subtask has been removed successfully',
+      });
+      // Clean up associated files
+      const newImageFiles = { ...subtaskImageFiles };
+      const newDocumentFiles = { ...subtaskDocumentFiles };
+      const newImagePreviews = { ...subtaskImagePreviews };
+      delete newImageFiles[subtaskId];
+      delete newDocumentFiles[subtaskId];
+      delete newImagePreviews[subtaskId];
+      setSubtaskImageFiles(newImageFiles);
+      setSubtaskDocumentFiles(newDocumentFiles);
+      setSubtaskImagePreviews(newImagePreviews);
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to remove subtask',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleSubtaskImageSelect = (subtaskId: string, files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only image files (JPEG, PNG, GIF, WebP)',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const currentFiles = subtaskImageFiles[subtaskId] || [];
+    const existingImages = task?.subtasks?.find(s => s.id === subtaskId)?.images || [];
+    if (currentFiles.length + existingImages.length + files.length > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 image files per subtask',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubtaskImageFiles(prev => ({
+      ...prev,
+      [subtaskId]: [...(prev[subtaskId] || []), ...files],
+    }));
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSubtaskImagePreviews(prev => ({
+          ...prev,
+          [subtaskId]: [...(prev[subtaskId] || []), reader.result as string],
+        }));
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleSubtaskDocumentSelect = (subtaskId: string, files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['application/pdf'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only PDF files',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const currentFiles = subtaskDocumentFiles[subtaskId] || [];
+    const existingFiles = task?.subtasks?.find(s => s.id === subtaskId)?.files || [];
+    if (currentFiles.length + existingFiles.length + files.length > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 document files per subtask',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubtaskDocumentFiles(prev => ({
+      ...prev,
+      [subtaskId]: [...(prev[subtaskId] || []), ...files],
+    }));
+  };
+
+  const uploadSubtaskAttachments = async (subtaskId: string) => {
+    if (!task) return;
+
+    try {
+      setUploadingSubtaskId(subtaskId);
+      const imageFiles = subtaskImageFiles[subtaskId] || [];
+      const documentFiles = subtaskDocumentFiles[subtaskId] || [];
+      const subtask = task.subtasks?.find(s => s.id === subtaskId);
+      
+      const uploadedImages: string[] = [];
+      const uploadedFiles: Array<{ url: string; name: string }> = [];
+
+      // Upload images
+      for (const file of imageFiles) {
+        try {
+          const result = await uploadImageToCloudinary(file);
+          uploadedImages.push(result.url);
+        } catch (error: any) {
+          console.error('Error uploading subtask image:', error);
+          toast({
+            title: 'Image upload failed',
+            description: `Failed to upload image. Continuing...`,
+            variant: 'destructive',
+          });
+        }
+      }
+
+      // Upload files
+      for (const file of documentFiles) {
+        try {
+          const result = await uploadFileToCloudinary(file);
+          uploadedFiles.push({ url: result.url, name: file.name });
+        } catch (error: any) {
+          console.error('Error uploading subtask file:', error);
+          toast({
+            title: 'File upload failed',
+            description: `Failed to upload file. Continuing...`,
+            variant: 'destructive',
+          });
+        }
+      }
+
+      // Update subtask with new attachments
+      const existingImages = subtask?.images || [];
+      const existingFiles = subtask?.files || [];
+      
+      // Normalize existing images to strings/objects
+      const normalizedExistingImages = existingImages.map((img: any) => {
+        if (typeof img === 'string') return img;
+        return img.url || img;
+      });
+      
+      // Normalize existing files to objects
+      const normalizedExistingFiles = existingFiles.map((file: any) => {
+        if (typeof file === 'string') return { url: file, name: 'Document' };
+        return { url: file.url || '', name: file.name || 'Document' };
+      });
+      
+      const updatedSubtasks = (task.subtasks || []).map(s => {
+        if (s.id === subtaskId) {
+          return {
+            ...s,
+            images: [...normalizedExistingImages, ...uploadedImages],
+            files: [...normalizedExistingFiles, ...uploadedFiles],
+          };
+        }
+        return s;
+      });
+
+      await updateTaskSubtasks(task.id, updatedSubtasks);
+
+      // Clear uploaded files
+      const newImageFiles = { ...subtaskImageFiles };
+      const newDocumentFiles = { ...subtaskDocumentFiles };
+      const newImagePreviews = { ...subtaskImagePreviews };
+      delete newImageFiles[subtaskId];
+      delete newDocumentFiles[subtaskId];
+      delete newImagePreviews[subtaskId];
+      setSubtaskImageFiles(newImageFiles);
+      setSubtaskDocumentFiles(newDocumentFiles);
+      setSubtaskImagePreviews(newImagePreviews);
+
+      toast({
+        title: 'Attachments uploaded',
+        description: 'Subtask attachments have been uploaded successfully',
+      });
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to upload attachments',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingSubtaskId(null);
+    }
+  };
+
+  const removeSubtaskImage = async (subtaskId: string, index: number) => {
+    if (!task) return;
+
+    const subtask = task.subtasks?.find(s => s.id === subtaskId);
+    if (!subtask) return;
+
+    const updatedImages = (subtask.images || []).filter((_, i) => i !== index);
+    const updatedSubtasks = (task.subtasks || []).map(s => {
+      if (s.id === subtaskId) {
+        return { ...s, images: updatedImages };
+      }
+      return s;
+    });
+
+    try {
+      await updateTaskSubtasks(task.id, updatedSubtasks);
+      toast({
+        title: 'Image removed',
+        description: 'Image has been removed from the subtask',
+      });
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to remove image',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const removeSubtaskFile = async (subtaskId: string, index: number) => {
+    if (!task) return;
+
+    const subtask = task.subtasks?.find(s => s.id === subtaskId);
+    if (!subtask) return;
+
+    const updatedFiles = (subtask.files || []).filter((_, i) => i !== index);
+    const updatedSubtasks = (task.subtasks || []).map(s => {
+      if (s.id === subtaskId) {
+        return { ...s, files: updatedFiles };
+      }
+      return s;
+    });
+
+    try {
+      await updateTaskSubtasks(task.id, updatedSubtasks);
+      toast({
+        title: 'File removed',
+        description: 'File has been removed from the subtask',
+      });
+      onTaskUpdated?.();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to remove file',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const validateAndAddImages = (files: File[]) => {
     if (files.length === 0) return;
@@ -438,10 +799,11 @@ export function TaskDetailsDialog({
         assignedMemberNames,
         images: [...existingImages, ...uploadedImages],
         files: [...existingFiles, ...uploadedFiles],
-        expectedKpi: formData.expectedKpi.trim() || undefined,
-        actualKpi: formData.actualKpi.trim() || undefined,
+        expectedKpi: formData.expectedKpi,
+        actualKpi: formData.actualKpi,
         eta: formData.eta,
         time: formData.time || undefined,
+        subtasks: task.subtasks,
       });
 
       toast({
@@ -472,18 +834,35 @@ export function TaskDetailsDialog({
   const handleStatusChange = async (newStatus: TaskStatus) => {
     if (!task) return;
 
-    // Validate that actualKpi is filled before allowing status change to Complete
+    // Validate KPI only if Expected KPI is set
     // Skip this check for collaborative tasks as they have their own completion logic
     if (newStatus === 'Complete' && !task.collaborative) {
-      const currentActualKpi = task.actualKpi?.trim() || '';
-      if (!currentActualKpi) {
-        toast({
-          title: 'Cannot complete task',
-          description: 'Please fill in the Actual KPI before completing the task',
-          variant: 'destructive',
-        });
-        return;
+      const currentActualKpi = task.actualKpi;
+      const currentExpectedKpi = task.expectedKpi;
+      
+      // Only validate KPI if Expected KPI is set
+      if (currentExpectedKpi !== undefined && currentExpectedKpi !== null) {
+        // If Expected KPI is set, Actual KPI must be set and must match
+        if (currentActualKpi === undefined || currentActualKpi === null) {
+          toast({
+            title: 'Cannot complete task',
+            description: 'Please fill in the Actual KPI before completing the task',
+            variant: 'destructive',
+          });
+          return;
+        }
+        
+        // Check if Actual KPI equals Expected KPI
+        if (currentActualKpi !== currentExpectedKpi) {
+          toast({
+            title: 'Cannot complete task',
+            description: 'Expected KPI has not been met',
+            variant: 'destructive',
+          });
+          return;
+        }
       }
+      // If Expected KPI is not set, task can be completed without KPI validation
     }
 
     try {
@@ -586,6 +965,15 @@ export function TaskDetailsDialog({
       }).filter(Boolean);
 
       // Clone the task with all the same data
+      // Reset subtasks completion status when cloning
+      const clonedSubtasks = task.subtasks?.map(subtask => ({
+        ...subtask,
+        id: `${subtask.id}-${Date.now()}`,
+        completed: false,
+        completedAt: undefined,
+        addedAt: new Date(),
+      })) || [];
+
       await createTask({
         taskId: newTaskId,
         name: `${task.name} (Copy)`,
@@ -594,8 +982,8 @@ export function TaskDetailsDialog({
         assignedMembers: task.assignedMembers,
         assignedMemberNames,
         images: task.images, // Copy image URLs
-        expectedKpi: task.expectedKpi || undefined,
-        actualKpi: task.actualKpi || undefined,
+        expectedKpi: task.expectedKpi,
+        actualKpi: task.actualKpi,
         eta: task.eta,
         time: task.time || undefined,
         createdBy: user?.id || '',
@@ -605,6 +993,7 @@ export function TaskDetailsDialog({
         recurringStartDate: task.recurringStartDate,
         recurringEndDate: task.recurringEndDate,
         collaborative: task.collaborative || false,
+        subtasks: clonedSubtasks,
       });
 
       toast({
@@ -797,12 +1186,20 @@ export function TaskDetailsDialog({
               <Label>Expected KPI</Label>
               {isEditing ? (
                 <Input
-                  value={formData.expectedKpi}
-                  onChange={(e) => setFormData(prev => ({ ...prev, expectedKpi: e.target.value }))}
-                  placeholder="e.g., 95% completion rate"
+                  type="number"
+                  step="0.01"
+                  value={formData.expectedKpi ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setFormData(prev => ({ 
+                      ...prev, 
+                      expectedKpi: value === '' ? undefined : parseFloat(value) 
+                    }));
+                  }}
+                  placeholder="e.g., 95"
                 />
               ) : (
-                <p className="text-muted-foreground">{task.expectedKpi || 'No Expected KPI set'}</p>
+                <p className="text-muted-foreground">{task.expectedKpi !== undefined ? task.expectedKpi : 'No Expected KPI set'}</p>
               )}
             </div>
             <div className="space-y-2">
@@ -810,9 +1207,17 @@ export function TaskDetailsDialog({
               {isEditingActualKpi ? (
                 <div className="flex gap-2">
                   <Input
-                    value={formData.actualKpi}
-                    onChange={(e) => setFormData(prev => ({ ...prev, actualKpi: e.target.value }))}
-                    placeholder="e.g., 92% completion rate"
+                    type="number"
+                    step="0.01"
+                    value={formData.actualKpi ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        actualKpi: value === '' ? undefined : parseFloat(value) 
+                      }));
+                    }}
+                    placeholder="e.g., 92"
                     disabled={isSavingActualKpi}
                   />
                   <Button
@@ -830,8 +1235,8 @@ export function TaskDetailsDialog({
                           assignedMemberNames: task.assignedMemberNames || [],
                           images: task.images,
                           files: task.files,
-                          expectedKpi: task.expectedKpi || '',
-                          actualKpi: formData.actualKpi.trim() || undefined,
+                          expectedKpi: task.expectedKpi,
+                          actualKpi: formData.actualKpi,
                           eta: task.eta,
                           time: task.time || undefined,
                         });
@@ -867,7 +1272,7 @@ export function TaskDetailsDialog({
                     variant="outline"
                     onClick={() => {
                       setIsEditingActualKpi(false);
-                      setFormData(prev => ({ ...prev, actualKpi: task.actualKpi || '' }));
+                      setFormData(prev => ({ ...prev, actualKpi: task.actualKpi }));
                     }}
                     disabled={isSavingActualKpi}
                   >
@@ -876,13 +1281,13 @@ export function TaskDetailsDialog({
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <p className="text-muted-foreground flex-1">{task.actualKpi || 'No Actual KPI set'}</p>
+                  <p className="text-muted-foreground flex-1">{task.actualKpi !== undefined ? task.actualKpi : 'No Actual KPI set'}</p>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => {
                       setIsEditingActualKpi(true);
-                      setFormData(prev => ({ ...prev, actualKpi: task.actualKpi || '' }));
+                      setFormData(prev => ({ ...prev, actualKpi: task.actualKpi }));
                     }}
                   >
                     <Edit className="h-4 w-4" />
@@ -1057,6 +1462,283 @@ export function TaskDetailsDialog({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Subtasks */}
+          <div className="space-y-2">
+            <Label>Subtasks</Label>
+            {!isAdmin && (
+              <p className="text-xs text-muted-foreground">Only admins can create subtasks</p>
+            )}
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter subtask description"
+                    value={newSubtaskDescription}
+                    onChange={(e) => setNewSubtaskDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addSubtask();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addSubtask}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add
+                  </Button>
+                </div>
+              )}
+              {task.subtasks && task.subtasks.length > 0 && (
+                <div className="space-y-3 border rounded-lg p-3">
+                  {task.subtasks.map((subtask) => {
+                    const subtaskImageFilesList = subtaskImageFiles[subtask.id] || [];
+                    const subtaskDocumentFilesList = subtaskDocumentFiles[subtask.id] || [];
+                    const subtaskImagePreviewsList = subtaskImagePreviews[subtask.id] || [];
+                    const existingImages = subtask.images || [];
+                    const existingFiles = subtask.files || [];
+                    const hasPendingUploads = subtaskImageFilesList.length > 0 || subtaskDocumentFilesList.length > 0;
+                    
+                    return (
+                      <div
+                        key={subtask.id}
+                        className="space-y-2 p-3 border rounded-md bg-card"
+                      >
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={subtask.completed}
+                            onCheckedChange={() => toggleSubtaskCompletion(subtask.id)}
+                            disabled={!isAdmin && !task.assignedMembers.includes(user?.id || '')}
+                            className="mt-1"
+                          />
+                          <div className="flex-1 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <p className={cn(
+                                "text-sm flex-1",
+                                subtask.completed && "line-through text-muted-foreground"
+                              )}>
+                                {subtask.description}
+                              </p>
+                              {isAdmin && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeSubtask(subtask.id)}
+                                  className="h-6 w-6 p-0"
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                Added: {format(subtask.addedAt, 'MMM dd, yyyy HH:mm')}
+                              </span>
+                              {subtask.completed && subtask.completedAt && (
+                                <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                  <CheckSquare className="h-3 w-3" />
+                                  Completed: {format(subtask.completedAt, 'MMM dd, yyyy HH:mm')}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Existing Subtask Images */}
+                            {existingImages.length > 0 && (
+                              <div className="flex gap-2 flex-wrap mt-2">
+                                {existingImages.map((image, index) => {
+                                  const imageUrl = typeof image === 'string' ? image : image.url;
+                                  return (
+                                    <div key={index} className="relative group">
+                                      <img
+                                        src={imageUrl}
+                                        alt={`Subtask image ${index + 1}`}
+                                        className="w-16 h-16 object-cover rounded cursor-pointer"
+                                        onClick={() => {
+                                          // Could open in a dialog for full view
+                                        }}
+                                      />
+                                      {isAdmin && (
+                                        <button
+                                          onClick={() => removeSubtaskImage(subtask.id, index)}
+                                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Pending Image Previews */}
+                            {subtaskImagePreviewsList.length > 0 && (
+                              <div className="flex gap-2 flex-wrap mt-2">
+                                {subtaskImagePreviewsList.map((preview, index) => (
+                                  <div key={index} className="relative group">
+                                    <img
+                                      src={preview}
+                                      alt={`Preview ${index + 1}`}
+                                      className="w-16 h-16 object-cover rounded"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newFiles = { ...subtaskImageFiles };
+                                        const newPreviews = { ...subtaskImagePreviews };
+                                        if (newFiles[subtask.id]) {
+                                          newFiles[subtask.id] = newFiles[subtask.id].filter((_, i) => i !== index);
+                                        }
+                                        if (newPreviews[subtask.id]) {
+                                          newPreviews[subtask.id] = newPreviews[subtask.id].filter((_, i) => i !== index);
+                                        }
+                                        setSubtaskImageFiles(newFiles);
+                                        setSubtaskImagePreviews(newPreviews);
+                                      }}
+                                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Existing Subtask Files */}
+                            {existingFiles.length > 0 && (
+                              <div className="space-y-1 mt-2">
+                                {existingFiles.map((file, index) => {
+                                  const fileUrl = typeof file === 'string' ? file : file.url;
+                                  const fileName = typeof file === 'string' ? 'Document' : file.name;
+                                  return (
+                                    <div key={index} className="flex items-center gap-2 p-2 border rounded bg-muted/50">
+                                      <FileText className="h-4 w-4 text-muted-foreground" />
+                                      <a
+                                        href={fileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs flex-1 hover:underline"
+                                      >
+                                        {fileName}
+                                      </a>
+                                      {isAdmin && (
+                                        <button
+                                          onClick={() => removeSubtaskFile(subtask.id, index)}
+                                          className="text-red-500 hover:text-red-700"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Pending Document Files */}
+                            {subtaskDocumentFilesList.length > 0 && (
+                              <div className="space-y-1 mt-2">
+                                {subtaskDocumentFilesList.map((file, index) => (
+                                  <div key={index} className="flex items-center gap-2 p-2 border rounded bg-muted/50">
+                                    <FileText className="h-4 w-4 text-muted-foreground" />
+                                    <span className="text-xs flex-1">{file.name}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newFiles = { ...subtaskDocumentFiles };
+                                        if (newFiles[subtask.id]) {
+                                          newFiles[subtask.id] = newFiles[subtask.id].filter((_, i) => i !== index);
+                                        }
+                                        setSubtaskDocumentFiles(newFiles);
+                                      }}
+                                      className="text-red-500 hover:text-red-700"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Subtask Attachment Buttons */}
+                            {isAdmin && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                                  <ImageIcon className="h-3 w-3" />
+                                  <span>Add Image</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={(e) => {
+                                      const files = Array.from(e.target.files || []);
+                                      handleSubtaskImageSelect(subtask.id, files);
+                                      e.target.value = '';
+                                    }}
+                                    className="hidden"
+                                    disabled={uploadingSubtaskId === subtask.id}
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                                  <FileText className="h-3 w-3" />
+                                  <span>Add File</span>
+                                  <input
+                                    type="file"
+                                    accept="application/pdf"
+                                    multiple
+                                    onChange={(e) => {
+                                      const files = Array.from(e.target.files || []);
+                                      handleSubtaskDocumentSelect(subtask.id, files);
+                                      e.target.value = '';
+                                    }}
+                                    className="hidden"
+                                    disabled={uploadingSubtaskId === subtask.id}
+                                  />
+                                </label>
+                                {hasPendingUploads && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => uploadSubtaskAttachments(subtask.id)}
+                                    disabled={uploadingSubtaskId === subtask.id}
+                                    className="ml-auto"
+                                  >
+                                    {uploadingSubtaskId === subtask.id ? (
+                                      <>
+                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                        Uploading...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Upload className="h-3 w-3 mr-1" />
+                                        Upload
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {(!task.subtasks || task.subtasks.length === 0) && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No subtasks added yet
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Images and Files */}
@@ -1603,8 +2285,8 @@ export function TaskDetailsDialog({
                       date: task.date,
                       assignedMembers: task.assignedMembers,
                       status: task.status,
-                      expectedKpi: task.expectedKpi || '',
-                      actualKpi: task.actualKpi || '',
+        expectedKpi: task.expectedKpi,
+        actualKpi: task.actualKpi,
                       eta: task.eta,
                       time: task.time || '09:00',
                     });

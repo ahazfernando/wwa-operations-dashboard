@@ -57,6 +57,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ImageCropDialog } from '@/components/ImageCropDialog'
 import { DragDropFileUpload } from '@/components/DragDropFileUpload'
 import { PhoneInput } from '@/components/PhoneInput'
+import { Progress } from '@/components/ui/progress'
 
 const FormSchema = z.object({
   fullName: z.string().optional(),
@@ -209,6 +210,67 @@ const Profile: React.FC = () => {
   }, [])
 
   const residingInAu = useWatch({ control: form.control, name: 'residingInAu' })
+  
+  // Watch all form values for progress calculation
+  const formValues = useWatch({ control: form.control })
+  
+  // Calculate profile completion percentage with useMemo for optimization
+  const profileProgress = React.useMemo(() => {
+    const fields: Array<{ value: any; weight: number }> = []
+    
+    // Personal Information fields (weighted)
+    fields.push({ value: formValues.fullName || formValues.preferredName, weight: 5 })
+    fields.push({ value: formValues.phone, weight: 5 })
+    fields.push({ value: formValues.dob, weight: 3 })
+    fields.push({ value: formValues.jobRole, weight: 5 })
+    fields.push({ value: formValues.workLocation, weight: 2 })
+    fields.push({ value: formValues.gender, weight: 2 })
+    fields.push({ value: formValues.residentialAddress, weight: 3 })
+    fields.push({ value: formValues.postalCode, weight: 2 })
+    fields.push({ value: formValues.employeeType, weight: 2 })
+    fields.push({ value: formValues.tfnAbn, weight: 3 })
+    fields.push({ value: formValues.idNumber, weight: 3 })
+    
+    // Documents (weighted)
+    fields.push({ value: uploads.profilePhoto.preview, weight: 5 })
+    fields.push({ value: uploads.idFrontPhoto.preview, weight: 8 })
+    fields.push({ value: uploads.idBackPhoto.preview, weight: 8 })
+    fields.push({ value: uploads.selfiePhoto.preview, weight: 5 })
+    fields.push({ value: uploads.passportPhoto.preview, weight: 5 })
+    fields.push({ value: uploads.contractDoc.preview, weight: 5 })
+    
+    // Conditional visa documents if residing in Australia
+    if (residingInAu) {
+      fields.push({ value: formValues.visaType, weight: 5 })
+      fields.push({ value: formValues.visaSubclass, weight: 5 })
+      fields.push({ value: uploads.visaNotice.preview, weight: 5 })
+    }
+    
+    // Emergency Contact
+    fields.push({ value: formValues.emergency?.fullName, weight: 5 })
+    fields.push({ value: formValues.emergency?.relationship, weight: 3 })
+    fields.push({ value: formValues.emergency?.phone, weight: 5 })
+    
+    // Declarations
+    fields.push({ value: formValues.declaration1, weight: 5 })
+    fields.push({ value: formValues.declaration2, weight: 5 })
+    
+    // Calculate total weight and completed weight
+    let totalWeight = 0
+    let completedWeight = 0
+    
+    fields.forEach(({ value, weight }) => {
+      totalWeight += weight
+      // Check if field is filled
+      const isFilled = value !== undefined && value !== null && value !== '' && value !== false
+      if (isFilled) {
+        completedWeight += weight
+      }
+    })
+    
+    if (totalWeight === 0) return 0
+    return Math.round((completedWeight / totalWeight) * 100)
+  }, [formValues, uploads, residingInAu])
 
   const app = React.useMemo(() => {
     if (getApps().length === 0) {
@@ -1411,6 +1473,24 @@ const Profile: React.FC = () => {
                 </div>
               </CardContent>
             </Card>
+          </div>
+
+          {/* Profile Completion Progress */}
+          <div className="mt-8 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Profile Completion</span>
+                <Badge variant={profileProgress === 100 ? "default" : "secondary"} className="ml-2">
+                  {profileProgress}%
+                </Badge>
+              </div>
+              {profileProgress < 100 && (
+                <span className="text-xs text-muted-foreground">
+                  Complete all sections to finish your profile
+                </span>
+              )}
+            </div>
+            <Progress value={profileProgress} className="h-2" />
           </div>
         </CardContent>
       </Card>

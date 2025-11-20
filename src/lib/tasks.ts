@@ -1,6 +1,6 @@
 import { collection, addDoc, updateDoc, doc, getDocs, query, where, orderBy, Timestamp, deleteDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Task, FirestoreTask, TaskStatus, StatusChange, TaskImage, TaskFile, CompletedBy } from '@/types/task';
+import { Task, FirestoreTask, TaskStatus, StatusChange, TaskImage, TaskFile, CompletedBy, Subtask } from '@/types/task';
 
 /**
  * Convert Firestore task to app Task
@@ -45,6 +45,42 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     completedAt: entry.completedAt?.toDate() || new Date(),
   }));
 
+  // Normalize subtasks: convert Firestore timestamps to Dates
+  const subtasks: Subtask[] = (docData.subtasks || []).map((subtask: any) => {
+    // Normalize subtask images
+    const subtaskImages: (string | TaskImage)[] = (subtask.images || []).map((img: any) => {
+      if (typeof img === 'string') {
+        return img;
+      }
+      return {
+        url: img.url || '',
+        description: img.description || '',
+      };
+    });
+
+    // Normalize subtask files
+    const subtaskFiles: (string | TaskFile)[] = (subtask.files || []).map((file: any) => {
+      if (typeof file === 'string') {
+        return file;
+      }
+      return {
+        url: file.url || '',
+        name: file.name || '',
+        description: file.description || '',
+      };
+    });
+
+    return {
+      id: subtask.id || '',
+      description: subtask.description || '',
+      addedAt: subtask.addedAt?.toDate() || new Date(),
+      completed: subtask.completed || false,
+      completedAt: subtask.completedAt?.toDate() || undefined,
+      images: subtaskImages.length > 0 ? subtaskImages : undefined,
+      files: subtaskFiles.length > 0 ? subtaskFiles : undefined,
+    };
+  });
+
   return {
     id: docId,
     taskId: docData.taskId || '',
@@ -56,8 +92,12 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     assignedMemberNames: docData.assignedMemberNames || [],
     images,
     files: files.length > 0 ? files : undefined,
-    expectedKpi: docData.expectedKpi || '',
-    actualKpi: docData.actualKpi || '',
+    expectedKpi: docData.expectedKpi !== undefined && docData.expectedKpi !== null && docData.expectedKpi !== '' 
+      ? (typeof docData.expectedKpi === 'number' ? docData.expectedKpi : parseFloat(docData.expectedKpi)) 
+      : undefined,
+    actualKpi: docData.actualKpi !== undefined && docData.actualKpi !== null && docData.actualKpi !== '' 
+      ? (typeof docData.actualKpi === 'number' ? docData.actualKpi : parseFloat(docData.actualKpi)) 
+      : undefined,
     eta: docData.eta?.toDate() || undefined,
     time: docData.time || '',
     createdAt: docData.createdAt?.toDate() || new Date(),
@@ -72,6 +112,7 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     parentTaskId: docData.parentTaskId || undefined,
     collaborative: docData.collaborative || false,
     completedBy: completedBy.length > 0 ? completedBy : undefined,
+    subtasks: subtasks.length > 0 ? subtasks : undefined,
   };
 }
 
@@ -87,8 +128,8 @@ export async function createTask(taskData: {
   assignedMemberNames: string[];
   images: (string | TaskImage)[];
   files?: (string | TaskFile)[];
-  expectedKpi?: string;
-  actualKpi?: string;
+  expectedKpi?: number;
+  actualKpi?: number;
   eta?: Date;
   time?: string;
   createdBy: string;
@@ -99,6 +140,7 @@ export async function createTask(taskData: {
   recurringEndDate?: Date;
   parentTaskId?: string;
   collaborative?: boolean;
+  subtasks?: Subtask[];
 }): Promise<string> {
   if (!db) {
     throw new Error('Firebase is not initialized. Please check your environment variables.');
@@ -124,8 +166,8 @@ export async function createTask(taskData: {
       assignedMemberNames: taskData.assignedMemberNames,
       images: sanitizedImages,
       files: sanitizedFiles,
-      expectedKpi: taskData.expectedKpi || '',
-      actualKpi: taskData.actualKpi || '',
+      expectedKpi: taskData.expectedKpi ?? null,
+      actualKpi: taskData.actualKpi ?? null,
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
       time: taskData.time || '',
       createdAt: now,
@@ -140,6 +182,19 @@ export async function createTask(taskData: {
       parentTaskId: taskData.parentTaskId || null,
       collaborative: taskData.collaborative || false,
       completedBy: [],
+      subtasks: taskData.subtasks ? taskData.subtasks.map(subtask => {
+        const sanitizedSubtaskImages = subtask.images ? sanitizeImages(subtask.images) : null;
+        const sanitizedSubtaskFiles = subtask.files ? sanitizeFiles(subtask.files) : null;
+        return {
+          id: subtask.id,
+          description: subtask.description,
+          addedAt: Timestamp.fromDate(subtask.addedAt),
+          completed: subtask.completed,
+          completedAt: subtask.completedAt ? Timestamp.fromDate(subtask.completedAt) : null,
+          images: sanitizedSubtaskImages,
+          files: sanitizedSubtaskFiles,
+        };
+      }) : [],
     });
 
     return docRef.id;
@@ -175,12 +230,23 @@ export async function updateTaskStatus(
     const isCollaborative = currentData.collaborative === true;
     const assignedMembers = currentData.assignedMembers || [];
     const completedBy = currentData.completedBy || [];
-    const actualKpi = currentData.actualKpi || '';
+    const actualKpi = currentData.actualKpi;
+    const expectedKpi = currentData.expectedKpi;
     
-    // Validate that actualKpi is filled before allowing status change to Complete
+    // Validate KPI only if Expected KPI is set
     // (Skip this check for collaborative tasks as they have their own completion logic)
-    if (status === 'Complete' && !isCollaborative && (!actualKpi || actualKpi.trim() === '')) {
-      throw new Error('Cannot complete task: Actual KPI must be filled before completing the task');
+    if (status === 'Complete' && !isCollaborative) {
+      // Only validate KPI if Expected KPI is set
+      if (expectedKpi !== undefined && expectedKpi !== null) {
+        // If Expected KPI is set, Actual KPI must be set and must match
+        if (actualKpi === undefined || actualKpi === null) {
+          throw new Error('Cannot complete task: Actual KPI must be filled before completing the task');
+        }
+        if (actualKpi !== expectedKpi) {
+          throw new Error('Expected KPI has not been met');
+        }
+      }
+      // If Expected KPI is not set, task can be completed without KPI validation
     }
     
     // Handle collaborative task completion logic
@@ -221,19 +287,35 @@ export async function updateTaskStatus(
         
         const updatedHistory = [...existingHistory, completionStatusChange];
         
-        // If all members completed, check if actualKpi is filled before marking as Complete
+        // If all members completed, check KPI validation only if Expected KPI is set
         if (allCompleted) {
-          // Validate that actualKpi is filled before allowing status change to Complete
-          if (!actualKpi || actualKpi.trim() === '') {
-            // Keep as Progress if actualKpi is not filled
-            await updateDoc(doc(db, 'tasks', taskId), {
-              status: 'Progress' as TaskStatus,
-              completedBy: newCompletedBy,
-              statusHistory: updatedHistory,
-              updatedAt: now,
-            });
-            throw new Error('Cannot complete task: Actual KPI must be filled before completing the task');
+          const expectedKpi = currentData.expectedKpi;
+          // Only validate KPI if Expected KPI is set
+          if (expectedKpi !== undefined && expectedKpi !== null) {
+            // If Expected KPI is set, Actual KPI must be set and must match
+            if (actualKpi === undefined || actualKpi === null) {
+              // Keep as Progress if actualKpi is not filled
+              await updateDoc(doc(db, 'tasks', taskId), {
+                status: 'Progress' as TaskStatus,
+                completedBy: newCompletedBy,
+                statusHistory: updatedHistory,
+                updatedAt: now,
+              });
+              throw new Error('Cannot complete task: Actual KPI must be filled before completing the task');
+            }
+            // Validate that actualKpi equals expectedKpi
+            if (actualKpi !== expectedKpi) {
+              // Keep as Progress if KPI doesn't match
+              await updateDoc(doc(db, 'tasks', taskId), {
+                status: 'Progress' as TaskStatus,
+                completedBy: newCompletedBy,
+                statusHistory: updatedHistory,
+                updatedAt: now,
+              });
+              throw new Error('Expected KPI has not been met');
+            }
           }
+          // If Expected KPI is not set, task can be completed without KPI validation
           
           const finalStatusChange = {
             status: 'Complete' as TaskStatus,
@@ -312,6 +394,23 @@ export async function updateTaskStatus(
             ? (currentData.recurringEndDate.toDate ? currentData.recurringEndDate.toDate() : new Date(currentData.recurringEndDate))
             : undefined;
           
+          // Reset subtasks completion status when creating recurring instance
+          const recurringSubtasks = currentData.subtasks ? currentData.subtasks.map((subtask: any) => {
+            const subtaskAddedAt = subtask.addedAt?.toDate ? subtask.addedAt.toDate() : new Date(subtask.addedAt);
+            // Preserve images and files but reset completion
+            const subtaskImages = subtask.images || [];
+            const subtaskFiles = subtask.files || [];
+            return {
+              id: `${subtask.id}-${Date.now()}`,
+              description: subtask.description || '',
+              addedAt: new Date(), // Reset to current date
+              completed: false, // Reset completion status
+              completedAt: undefined, // Clear completion time
+              images: subtaskImages.length > 0 ? subtaskImages : undefined,
+              files: subtaskFiles.length > 0 ? subtaskFiles : undefined,
+            };
+          }) : [];
+
           // Create new task with same scope but new ID and current date
           const newTaskData = {
             taskId: newTaskId,
@@ -321,8 +420,8 @@ export async function updateTaskStatus(
             assignedMembers: currentData.assignedMembers,
             assignedMemberNames: currentData.assignedMemberNames || [],
             images: [], // Start with no images for the new instance
-            expectedKpi: currentData.expectedKpi || '',
-            actualKpi: currentData.actualKpi || '',
+            expectedKpi: currentData.expectedKpi,
+            actualKpi: currentData.actualKpi,
             eta: etaDate,
             time: currentData.time || '',
             createdBy: options?.changedBy || currentData.createdBy,
@@ -333,6 +432,7 @@ export async function updateTaskStatus(
             recurringEndDate: recurringEndDate,
             parentTaskId: parentId, // Link to the original recurring task
             collaborative: currentData.collaborative || false,
+            subtasks: recurringSubtasks,
           };
 
           await createTask(newTaskData);
@@ -426,6 +526,37 @@ export async function updateTaskFiles(taskId: string, files: (string | TaskFile)
 }
 
 /**
+ * Update task subtasks
+ */
+export async function updateTaskSubtasks(taskId: string, subtasks: Subtask[]): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
+  try {
+    const subtasksData = subtasks.map(subtask => {
+      const sanitizedSubtaskImages = subtask.images ? sanitizeImages(subtask.images) : null;
+      const sanitizedSubtaskFiles = subtask.files ? sanitizeFiles(subtask.files) : null;
+      return {
+        id: subtask.id,
+        description: subtask.description,
+        addedAt: Timestamp.fromDate(subtask.addedAt),
+        completed: subtask.completed,
+        completedAt: subtask.completedAt ? Timestamp.fromDate(subtask.completedAt) : null,
+        images: sanitizedSubtaskImages,
+        files: sanitizedSubtaskFiles,
+      };
+    });
+    await updateDoc(doc(db, 'tasks', taskId), {
+      subtasks: subtasksData,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error updating task subtasks:', error);
+    throw error;
+  }
+}
+
+/**
  * Update task details
  */
 export async function updateTask(
@@ -439,10 +570,11 @@ export async function updateTask(
     assignedMemberNames: string[];
     images: (string | TaskImage)[];
     files?: (string | TaskFile)[];
-    expectedKpi?: string;
-    actualKpi?: string;
+    expectedKpi?: number;
+    actualKpi?: number;
     eta?: Date;
     time?: string;
+    subtasks?: Subtask[];
   }
 ): Promise<void> {
   if (!db) {
@@ -458,8 +590,8 @@ export async function updateTask(
       assignedMembers: taskData.assignedMembers,
       assignedMemberNames: taskData.assignedMemberNames,
       images: sanitizedImages,
-      expectedKpi: taskData.expectedKpi || '',
-      actualKpi: taskData.actualKpi || '',
+      expectedKpi: taskData.expectedKpi ?? null,
+      actualKpi: taskData.actualKpi ?? null,
       eta: taskData.eta ? Timestamp.fromDate(taskData.eta) : null,
       time: taskData.time || '',
       updatedAt: Timestamp.now(),
@@ -468,6 +600,22 @@ export async function updateTask(
     if (taskData.files !== undefined) {
       const sanitizedFiles = sanitizeFiles(taskData.files);
       updateData.files = sanitizedFiles;
+    }
+    
+    if (taskData.subtasks !== undefined) {
+      updateData.subtasks = taskData.subtasks.map(subtask => {
+        const sanitizedSubtaskImages = subtask.images ? sanitizeImages(subtask.images) : null;
+        const sanitizedSubtaskFiles = subtask.files ? sanitizeFiles(subtask.files) : null;
+        return {
+          id: subtask.id,
+          description: subtask.description,
+          addedAt: Timestamp.fromDate(subtask.addedAt),
+          completed: subtask.completed,
+          completedAt: subtask.completedAt ? Timestamp.fromDate(subtask.completedAt) : null,
+          images: sanitizedSubtaskImages,
+          files: sanitizedSubtaskFiles,
+        };
+      });
     }
     
     await updateDoc(doc(db, 'tasks', taskId), updateData);

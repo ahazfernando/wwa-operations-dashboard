@@ -282,15 +282,32 @@ const Tasks = () => {
         return;
       }
 
-      // Validate that actualKpi is filled before allowing status change to Complete
+      // Validate KPI only if Expected KPI is set
       // Skip this check for collaborative tasks as they have their own completion logic
-      if (newStatus === 'Complete' && !task.collaborative && (!task.actualKpi || task.actualKpi.trim() === '')) {
-        toast({
-          title: 'Cannot complete task',
-          description: 'Please fill in the Actual KPI before completing the task',
-          variant: 'destructive',
-        });
-        return;
+      if (newStatus === 'Complete' && !task.collaborative) {
+        // Only validate KPI if Expected KPI is set
+        if (task.expectedKpi !== undefined && task.expectedKpi !== null) {
+          // If Expected KPI is set, Actual KPI must be set and must match
+          if (task.actualKpi === undefined || task.actualKpi === null) {
+            toast({
+              title: 'Cannot complete task',
+              description: 'Please fill in the Actual KPI before completing the task',
+              variant: 'destructive',
+            });
+            return;
+          }
+          
+          // Check if Actual KPI equals Expected KPI
+          if (task.actualKpi !== task.expectedKpi) {
+            toast({
+              title: 'Cannot complete task',
+              description: 'Expected KPI has not been met',
+              variant: 'destructive',
+            });
+            return;
+          }
+        }
+        // If Expected KPI is not set, task can be completed without KPI validation
       }
 
       try {

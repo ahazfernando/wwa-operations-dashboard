@@ -6,15 +6,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight } from 'lucide-react';
+import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle, Bell, Plus } from 'lucide-react';
 import { getTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ActiveUsersSection } from '@/components/ActiveUsersSection';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -23,11 +25,14 @@ const Dashboard = () => {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [loadingPhoto, setLoadingPhoto] = useState(true);
+  const [isBusy, setIsBusy] = useState(false);
+  const [loadingBusy, setLoadingBusy] = useState(true);
 
   useEffect(() => {
     if (user) {
       loadAssignedTasks();
       loadProfilePhoto();
+      loadBusyStatus();
     }
   }, [user]);
 
@@ -47,6 +52,45 @@ const Dashboard = () => {
       console.error('Error loading profile photo:', error);
     } finally {
       setLoadingPhoto(false);
+    }
+  };
+
+  const loadBusyStatus = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingBusy(true);
+      const profileDoc = await getDoc(doc(db, 'profiles', user.id));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        if (data.isBusy !== undefined) {
+          setIsBusy(Boolean(data.isBusy));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading busy status:', error);
+    } finally {
+      setLoadingBusy(false);
+    }
+  };
+
+  const handleBusyToggle = async (checked: boolean) => {
+    if (!user) return;
+    
+    setIsBusy(checked);
+    try {
+      await setDoc(
+        doc(db, 'profiles', user.id),
+        {
+          isBusy: checked,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Error saving busy status:', error);
+      // Revert on error
+      setIsBusy(!checked);
     }
   };
 
@@ -97,20 +141,41 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        {loadingPhoto ? (
-          <Skeleton className="h-16 w-16 rounded-full" />
-        ) : (
-          <Avatar className="h-16 w-16">
-            <AvatarImage src={profilePhoto || undefined} alt={user?.name || 'User'} />
-            <AvatarFallback className="text-lg font-semibold">
-              {user?.name ? getInitials(user.name) : 'U'}
-            </AvatarFallback>
-          </Avatar>
-        )}
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}</h1>
-          <p className="text-muted-foreground mt-1">We Will Australia Operations Dashboard</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          {loadingPhoto ? (
+            <Skeleton className="h-16 w-16 rounded-full" />
+          ) : (
+            <Avatar className="h-16 w-16">
+              <AvatarImage src={profilePhoto || undefined} alt={user?.name || 'User'} />
+              <AvatarFallback className="text-lg font-semibold">
+                {user?.name ? getInitials(user.name) : 'U'}
+              </AvatarFallback>
+            </Avatar>
+          )}
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}</h1>
+            <p className="text-muted-foreground mt-1">We Will Australia Operations Dashboard</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="isBusy"
+              checked={isBusy}
+              onCheckedChange={handleBusyToggle}
+              disabled={loadingBusy}
+            />
+            <Label htmlFor="isBusy" className="text-sm font-medium cursor-pointer">
+              Mark as Busy
+            </Label>
+          </div>
+          {isBusy && (
+            <Badge variant="destructive" className="text-xs">
+              <AlertCircle className="h-3 w-3 mr-1" />
+              Busy
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -136,21 +201,47 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="text-sm space-y-1">
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/clock')}
+              >
                 <Clock className="h-4 w-4" />
                 <span>Clock in/out for time tracking</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/ratings')}
+              >
                 <Star className="h-4 w-4" />
                 <span>Submit weekly ratings</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/leads')}
+              >
                 <Users className="h-4 w-4" />
                 <span>View and manage leads</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/tasks')}
+              >
                 <CheckSquare className="h-4 w-4" />
                 <span>View assigned tasks</span>
+              </p>
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/reminders')}
+              >
+                <Bell className="h-4 w-4" />
+                <span>Manage reminders</span>
+              </p>
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/reminders')}
+              >
+                <Plus className="h-4 w-4" />
+                <span>New reminder</span>
               </p>
             </div>
           </CardContent>
