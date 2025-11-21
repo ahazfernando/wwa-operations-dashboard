@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { sendClockInEmailsToAdmins } from '@/lib/email';
-import { getAllLocationData, LocationData, SystemLocationData } from '@/lib/location';
+import { getAllLocationData, LocationData, SystemLocationData, isWithinRadius } from '@/lib/location';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -467,6 +467,40 @@ const Clock = () => {
       try {
         const { employeeLocation, systemLocation } = await getAllLocationData();
         
+        // Check if user has an approved work-from-home location
+        if (employeeLocation.latitude && employeeLocation.longitude && db) {
+          try {
+            const workFromHomeDoc = await getDoc(doc(db, 'workFromHomeLocations', user.id));
+            if (workFromHomeDoc.exists()) {
+              const workFromHomeData = workFromHomeDoc.data();
+              if (workFromHomeData.status === 'approved' && 
+                  workFromHomeData.latitude && 
+                  workFromHomeData.longitude) {
+                // Check if user is within 50m radius
+                const withinRadius = isWithinRadius(
+                  employeeLocation.latitude,
+                  employeeLocation.longitude,
+                  workFromHomeData.latitude,
+                  workFromHomeData.longitude,
+                  50 // 50 meters
+                );
+
+                if (!withinRadius) {
+                  toast({
+                    title: 'Location Not Allowed',
+                    description: 'You must be within 50 meters of your approved work from home location to clock in. Please move closer to your approved location.',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+              }
+            }
+          } catch (locationCheckError) {
+            // If we can't check the work-from-home location, allow clock-in but log the error
+            console.error('Failed to check work-from-home location:', locationCheckError);
+          }
+        }
+        
         // Build clockInLocation object, only including defined fields
         const clockInLocation: any = {
           latitude: employeeLocation.latitude,
@@ -562,6 +596,44 @@ const Clock = () => {
           variant: 'destructive',
         });
         return;
+      }
+
+      // Check location for clock out if user has approved work-from-home location
+      if (db) {
+        try {
+          const workFromHomeDoc = await getDoc(doc(db, 'workFromHomeLocations', user.id));
+          if (workFromHomeDoc.exists()) {
+            const workFromHomeData = workFromHomeDoc.data();
+            if (workFromHomeData.status === 'approved' && 
+                workFromHomeData.latitude && 
+                workFromHomeData.longitude) {
+              // Get current location
+              const { employeeLocation } = await getAllLocationData();
+              if (employeeLocation.latitude && employeeLocation.longitude) {
+                // Check if user is within 50m radius
+                const withinRadius = isWithinRadius(
+                  employeeLocation.latitude,
+                  employeeLocation.longitude,
+                  workFromHomeData.latitude,
+                  workFromHomeData.longitude,
+                  50 // 50 meters
+                );
+
+                if (!withinRadius) {
+                  toast({
+                    title: 'Location Not Allowed',
+                    description: 'You must be within 50 meters of your approved work from home location to clock out. Please move closer to your approved location.',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+              }
+            }
+          }
+        } catch (locationCheckError) {
+          // If we can't check the work-from-home location, allow clock-out but log the error
+          console.error('Failed to check work-from-home location:', locationCheckError);
+        }
       }
 
       // Verify document exists before updating

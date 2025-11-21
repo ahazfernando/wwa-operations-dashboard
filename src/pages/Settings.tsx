@@ -13,10 +13,10 @@ import { Check, X, Upload, FileText, Download, Search, History } from 'lucide-re
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, collection, query, where, getDocs, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
 import { UserProfileViewDialog } from '@/components/UserProfileViewDialog';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, MapPin } from 'lucide-react';
 
 const Settings = () => {
   const { approveUser, rejectUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
@@ -32,10 +32,14 @@ const Settings = () => {
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedJobRole, setSelectedJobRole] = useState<string>('all');
+  const [pendingLocations, setPendingLocations] = useState<any[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [processingLocation, setProcessingLocation] = useState<string | null>(null);
 
   useEffect(() => {
     loadPendingUsers();
     loadAllUsers();
+    loadPendingLocations();
   }, []);
 
   const loadPendingUsers = async () => {
@@ -94,6 +98,78 @@ const Settings = () => {
       });
     } finally {
       setProcessing(null);
+    }
+  };
+
+  const loadPendingLocations = async () => {
+    if (!db) return;
+    try {
+      setLocationsLoading(true);
+      const q = query(collection(db, 'workFromHomeLocations'), where('status', '==', 'pending'));
+      const querySnapshot = await getDocs(q);
+      const locations = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setPendingLocations(locations);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load pending locations',
+        variant: 'destructive',
+      });
+    } finally {
+      setLocationsLoading(false);
+    }
+  };
+
+  const handleApproveLocation = async (locationId: string) => {
+    if (!db || !currentUser) return;
+    try {
+      setProcessingLocation(locationId);
+      await updateDoc(doc(db, 'workFromHomeLocations', locationId), {
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: currentUser.id,
+        approvedByName: currentUser.name || currentUser.email,
+      });
+      toast({
+        title: 'Location Approved',
+        description: 'Work from home location has been approved.',
+      });
+      await loadPendingLocations();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to approve location',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingLocation(null);
+    }
+  };
+
+  const handleRejectLocation = async (locationId: string) => {
+    if (!db) return;
+    try {
+      setProcessingLocation(locationId);
+      await updateDoc(doc(db, 'workFromHomeLocations', locationId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp(),
+      });
+      toast({
+        title: 'Location Rejected',
+        description: 'Work from home location has been rejected.',
+      });
+      await loadPendingLocations();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to reject location',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingLocation(null);
     }
   };
 
@@ -766,6 +842,119 @@ const Settings = () => {
                           disabled={processing === pendingUser.id}
                         >
                           {processing === pendingUser.id ? (
+                            <Skeleton className="h-4 w-16" />
+                          ) : (
+                            <>
+                              <X className="h-4 w-4 mr-1" />
+                              Reject
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending Work From Home Location Approvals</CardTitle>
+          <CardDescription>
+            Review and approve or reject work from home location requests. Once approved, users can only clock in/out within 50 meters of their approved location.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {locationsLoading ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-5 gap-4 pb-2 border-b">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-5 gap-4 py-2">
+                      {Array.from({ length: 5 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : pendingLocations.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No pending work from home location approvals
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Location Name</TableHead>
+                  <TableHead>Coordinates</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingLocations.map((location) => (
+                  <TableRow key={location.id}>
+                    <TableCell className="font-medium">
+                      {location.userName || 'Unknown User'}
+                    </TableCell>
+                    <TableCell>
+                      {location.userName}'s Work from Home Location
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div>Lat: {location.latitude?.toFixed(6)}</div>
+                        <div>Lng: {location.longitude?.toFixed(6)}</div>
+                        <a
+                          href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline text-xs flex items-center gap-1 mt-1"
+                        >
+                          <MapPin className="h-3 w-3" />
+                          View on Map
+                        </a>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {location.address || (
+                        <span className="text-muted-foreground text-sm">No address provided</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => handleApproveLocation(location.id)}
+                          disabled={processingLocation === location.id}
+                        >
+                          {processingLocation === location.id ? (
+                            <Skeleton className="h-4 w-16" />
+                          ) : (
+                            <>
+                              <Check className="h-4 w-4 mr-1" />
+                              Approve
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleRejectLocation(location.id)}
+                          disabled={processingLocation === location.id}
+                        >
+                          {processingLocation === location.id ? (
                             <Skeleton className="h-4 w-16" />
                           ) : (
                             <>
