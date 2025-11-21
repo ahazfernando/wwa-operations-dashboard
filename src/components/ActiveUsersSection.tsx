@@ -6,12 +6,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Activity, LogOut, Clock, AlertCircle } from 'lucide-react';
+import { Activity, LogOut, Clock, AlertCircle, CheckSquare } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { ActiveUser } from '@/components/clock/types';
 import { formatTime } from '@/components/clock/utils';
+import { getTasksByUser } from '@/lib/tasks';
+import { Task } from '@/types/task';
 
 interface RecentClockOut {
   userId: string;
@@ -30,6 +32,7 @@ export const ActiveUsersSection = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [profilePhotos, setProfilePhotos] = useState<Record<string, string>>({});
   const [busyStatus, setBusyStatus] = useState<Record<string, boolean>>({});
+  const [userTasks, setUserTasks] = useState<Record<string, Task | null>>({});
 
   const getTimeEntryData = (data: unknown): {
     userId: string;
@@ -86,6 +89,23 @@ export const ActiveUsersSection = () => {
     return false;
   };
 
+  const loadMostRecentActiveTask = async (userId: string): Promise<Task | null> => {
+    try {
+      const tasks = await getTasksByUser(userId);
+      // Filter out completed tasks and get the most recent active task
+      const activeTasks = tasks.filter(task => task.status !== 'Complete');
+      if (activeTasks.length > 0) {
+        // Sort by updatedAt descending to get the most recently updated active task
+        activeTasks.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+        return activeTasks[0];
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error loading most recent active task for user ${userId}:`, error);
+      return null;
+    }
+  };
+
   const loadActiveUsers = async () => {
     if (!user || !db) return;
 
@@ -139,25 +159,29 @@ export const ActiveUsersSection = () => {
       const limitedActive = active.slice(0, 3);
       setActiveUsers(limitedActive);
 
-      // Load profile photos and busy status for active users
+      // Load profile photos, busy status, and most recent active task for active users
       const photoPromises = limitedActive.map(async (activeUser) => {
-        const [photo, isBusy] = await Promise.all([
+        const [photo, isBusy, task] = await Promise.all([
           loadProfilePhoto(activeUser.userId),
-          loadBusyStatus(activeUser.userId)
+          loadBusyStatus(activeUser.userId),
+          loadMostRecentActiveTask(activeUser.userId)
         ]);
-        return { userId: activeUser.userId, photo, isBusy };
+        return { userId: activeUser.userId, photo, isBusy, task };
       });
       const results = await Promise.all(photoPromises);
       const newPhotos: Record<string, string> = {};
       const newBusyStatus: Record<string, boolean> = {};
-      results.forEach(({ userId, photo, isBusy }) => {
+      const newTasks: Record<string, Task | null> = {};
+      results.forEach(({ userId, photo, isBusy, task }) => {
         if (photo) {
           newPhotos[userId] = photo;
         }
         newBusyStatus[userId] = isBusy;
+        newTasks[userId] = task;
       });
       setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
       setBusyStatus(prev => ({ ...prev, ...newBusyStatus }));
+      setUserTasks(prev => ({ ...prev, ...newTasks }));
     } catch (error: any) {
       console.error('Error loading active users:', error);
     }
@@ -217,19 +241,25 @@ export const ActiveUsersSection = () => {
       const limitedRecent = recent.slice(0, 3);
       setRecentClockOuts(limitedRecent);
 
-      // Load profile photos for recent clock outs
+      // Load profile photos and most recent active task for recent clock outs
       const photoPromises = limitedRecent.map(async (recentUser) => {
-        const photo = await loadProfilePhoto(recentUser.userId);
-        return { userId: recentUser.userId, photo };
+        const [photo, task] = await Promise.all([
+          loadProfilePhoto(recentUser.userId),
+          loadMostRecentActiveTask(recentUser.userId)
+        ]);
+        return { userId: recentUser.userId, photo, task };
       });
       const photoResults = await Promise.all(photoPromises);
       const newPhotos: Record<string, string> = {};
-      photoResults.forEach(({ userId, photo }) => {
+      const newTasks: Record<string, Task | null> = {};
+      photoResults.forEach(({ userId, photo, task }) => {
         if (photo) {
           newPhotos[userId] = photo;
         }
+        newTasks[userId] = task;
       });
       setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
+      setUserTasks(prev => ({ ...prev, ...newTasks }));
     } catch (error: any) {
       console.error('Error loading recent clock outs:', error);
     }
@@ -361,6 +391,21 @@ export const ActiveUsersSection = () => {
                           </Badge>
                         )}
                       </div>
+                      {userTasks[activeUser.userId] && (
+                        <div className="mt-2 pt-2 border-t border-green-200 dark:border-green-800">
+                          <div className="flex items-start gap-2">
+                            <CheckSquare className="h-3 w-3 mt-0.5 text-green-600 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-green-700 dark:text-green-300 truncate">
+                                {userTasks[activeUser.userId]?.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {userTasks[activeUser.userId]?.description || 'No description'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -448,6 +493,21 @@ export const ActiveUsersSection = () => {
                               addSuffix: true,
                             })}
                           </span>
+                        </div>
+                      )}
+                      {userTasks[recent.userId] && (
+                        <div className="mt-2 pt-2 border-t">
+                          <div className="flex items-start gap-2">
+                            <CheckSquare className="h-3 w-3 mt-0.5 text-blue-600 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-blue-700 dark:text-blue-300 truncate">
+                                {userTasks[recent.userId]?.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {userTasks[recent.userId]?.description || 'No description'}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

@@ -6,20 +6,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle, Bell, Plus } from 'lucide-react';
-import { getTasksByUser } from '@/lib/tasks';
+import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle, Bell, Plus, LogOut, LogIn } from 'lucide-react';
+import { getTasksByUser, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ActiveUsersSection } from '@/components/ActiveUsersSection';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, getAllUsers } = useAuth();
   const router = useRouter();
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -27,12 +27,23 @@ const Dashboard = () => {
   const [loadingPhoto, setLoadingPhoto] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
   const [loadingBusy, setLoadingBusy] = useState(true);
+  const [recentActivity, setRecentActivity] = useState<{
+    completedTask: Task | null;
+    recentClockOut: { userName: string; clockOutTime: Date } | null;
+    recentClockIn: { userName: string; clockInTime: Date } | null;
+  }>({
+    completedTask: null,
+    recentClockOut: null,
+    recentClockIn: null,
+  });
+  const [loadingActivity, setLoadingActivity] = useState(true);
 
   useEffect(() => {
     if (user) {
       loadAssignedTasks();
       loadProfilePhoto();
       loadBusyStatus();
+      loadRecentActivity();
     }
   }, [user]);
 
@@ -107,6 +118,152 @@ const Dashboard = () => {
       console.error('Error loading assigned tasks:', error);
     } finally {
       setLoadingTasks(false);
+    }
+  };
+
+  const getTimeEntryData = (data: unknown): {
+    userId: string;
+    date: Timestamp;
+    dateString?: string;
+    clockIn: Timestamp | null;
+    clockOut: Timestamp | null;
+    totalHours: number | null;
+    createdAt: Timestamp;
+    updatedAt: Timestamp;
+  } => {
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid time entry data');
+    }
+    return data as {
+      userId: string;
+      date: Timestamp;
+      dateString?: string;
+      clockIn: Timestamp | null;
+      clockOut: Timestamp | null;
+      totalHours: number | null;
+      createdAt: Timestamp;
+      updatedAt: Timestamp;
+    };
+  };
+
+  const loadRecentActivity = async () => {
+    if (!user || !db) return;
+
+    try {
+      setLoadingActivity(true);
+
+      // Load most recent completed task
+      let completedTask: Task | null = null;
+      try {
+        const completedTasks = user.role === 'admin' 
+          ? await getCompletedTasks()
+          : await getCompletedTasksByUser(user.id);
+        
+        if (completedTasks.length > 0) {
+          // Tasks are already sorted by completion date (most recent first)
+          completedTask = completedTasks[0];
+        }
+      } catch (error) {
+        console.error('Error loading completed task:', error);
+      }
+
+      // Load most recent clock out
+      let recentClockOut: { userName: string; clockOutTime: Date } | null = null;
+      try {
+        // Fetch recent time entries and filter in memory
+        const timeEntriesQuery = query(
+          collection(db, 'timeEntries'),
+          orderBy('updatedAt', 'desc'),
+          limit(50) // Get recent entries to filter
+        );
+        const timeEntriesSnapshot = await getDocs(timeEntriesQuery);
+        
+        const clockOuts: Array<{ userId: string; clockOutTime: Date }> = [];
+        timeEntriesSnapshot.docs.forEach((doc) => {
+          try {
+            const data = getTimeEntryData(doc.data());
+            if (data.clockOut) {
+              clockOuts.push({
+                userId: data.userId,
+                clockOutTime: data.clockOut.toDate(),
+              });
+            }
+          } catch {
+            // Skip invalid entries
+          }
+        });
+
+        if (clockOuts.length > 0) {
+          // Sort by clock out time (most recent first)
+          clockOuts.sort((a, b) => b.clockOutTime.getTime() - a.clockOutTime.getTime());
+          const mostRecent = clockOuts[0];
+          const users = await getAllUsers();
+          const userInfo = users.find((u: any) => u.id === mostRecent.userId);
+          const userName = userInfo 
+            ? (userInfo.name || `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim() || userInfo.email)
+            : 'Unknown User';
+          recentClockOut = {
+            userName,
+            clockOutTime: mostRecent.clockOutTime,
+          };
+        }
+      } catch (error) {
+        console.error('Error loading recent clock out:', error);
+      }
+
+      // Load most recent clock in
+      let recentClockIn: { userName: string; clockInTime: Date } | null = null;
+      try {
+        // Fetch recent time entries and filter in memory
+        const timeEntriesQuery = query(
+          collection(db, 'timeEntries'),
+          orderBy('updatedAt', 'desc'),
+          limit(50) // Get recent entries to filter
+        );
+        const timeEntriesSnapshot = await getDocs(timeEntriesQuery);
+        
+        const clockIns: Array<{ userId: string; clockInTime: Date }> = [];
+        timeEntriesSnapshot.docs.forEach((doc) => {
+          try {
+            const data = getTimeEntryData(doc.data());
+            if (data.clockIn) {
+              clockIns.push({
+                userId: data.userId,
+                clockInTime: data.clockIn.toDate(),
+              });
+            }
+          } catch {
+            // Skip invalid entries
+          }
+        });
+
+        if (clockIns.length > 0) {
+          // Sort by clock in time (most recent first)
+          clockIns.sort((a, b) => b.clockInTime.getTime() - a.clockInTime.getTime());
+          const mostRecent = clockIns[0];
+          const users = await getAllUsers();
+          const userInfo = users.find((u: any) => u.id === mostRecent.userId);
+          const userName = userInfo 
+            ? (userInfo.name || `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim() || userInfo.email)
+            : 'Unknown User';
+          recentClockIn = {
+            userName,
+            clockInTime: mostRecent.clockInTime,
+          };
+        }
+      } catch (error) {
+        console.error('Error loading recent clock in:', error);
+      }
+
+      setRecentActivity({
+        completedTask,
+        recentClockOut,
+        recentClockIn,
+      });
+    } catch (error) {
+      console.error('Error loading recent activity:', error);
+    } finally {
+      setLoadingActivity(false);
     }
   };
 
@@ -253,29 +410,70 @@ const Dashboard = () => {
             <CardDescription>Latest updates and notifications</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3 text-sm">
-              <div className="flex items-start gap-2">
-                <TrendingUp className="h-4 w-4 mt-0.5 text-green-600" />
-                <div>
-                  <p className="font-medium">New lead added</p>
-                  <p className="text-muted-foreground text-xs">Sydney - 2 hours ago</p>
-                </div>
+            {loadingActivity ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <Skeleton className="h-4 w-4 mt-0.5" />
+                    <div className="flex-1 space-y-1">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-start gap-2">
-                <Star className="h-4 w-4 mt-0.5 text-yellow-600" />
-                <div>
-                  <p className="font-medium">Rating submitted</p>
-                  <p className="text-muted-foreground text-xs">Weekly review - 1 day ago</p>
-                </div>
+            ) : (
+              <div className="space-y-3 text-sm">
+                {recentActivity.completedTask && (
+                  <div className="flex items-start gap-2">
+                    <CheckSquare className="h-4 w-4 mt-0.5 text-green-600" />
+                    <div>
+                      <p className="font-medium">Task completed</p>
+                      <p className="text-muted-foreground text-xs">
+                        {recentActivity.completedTask.name} - {formatDistanceToNow(
+                          recentActivity.completedTask.statusHistory?.find(h => h.status === 'Complete')?.timestamp || 
+                          recentActivity.completedTask.updatedAt,
+                          { addSuffix: true }
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {recentActivity.recentClockOut && (
+                  <div className="flex items-start gap-2">
+                    <LogOut className="h-4 w-4 mt-0.5 text-blue-600" />
+                    <div>
+                      <p className="font-medium">User clocked out</p>
+                      <p className="text-muted-foreground text-xs">
+                        {recentActivity.recentClockOut.userName} - {formatDistanceToNow(
+                          recentActivity.recentClockOut.clockOutTime,
+                          { addSuffix: true }
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {recentActivity.recentClockIn && (
+                  <div className="flex items-start gap-2">
+                    <LogIn className="h-4 w-4 mt-0.5 text-purple-600" />
+                    <div>
+                      <p className="font-medium">User clocked in</p>
+                      <p className="text-muted-foreground text-xs">
+                        {recentActivity.recentClockIn.userName} - {formatDistanceToNow(
+                          recentActivity.recentClockIn.clockInTime,
+                          { addSuffix: true }
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {!recentActivity.completedTask && !recentActivity.recentClockOut && !recentActivity.recentClockIn && (
+                  <div className="text-center py-4 text-muted-foreground text-xs">
+                    No recent activity
+                  </div>
+                )}
               </div>
-              <div className="flex items-start gap-2">
-                <Clock className="h-4 w-4 mt-0.5 text-blue-600" />
-                <div>
-                  <p className="font-medium">Clock in recorded</p>
-                  <p className="text-muted-foreground text-xs">Today at 08:30 AM</p>
-                </div>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>

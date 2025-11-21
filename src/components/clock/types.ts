@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
+import { LocationData, SystemLocationData } from '@/lib/location';
 
 export interface TimeEntry {
   id: string;
@@ -9,6 +10,8 @@ export interface TimeEntry {
   clockIn: Date | null;
   clockOut: Date | null;
   totalHours: number | null;
+  clockInLocation?: LocationData;
+  clockInSystemLocation?: SystemLocationData;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -31,6 +34,8 @@ export interface MergedTimeEntry {
   totalHours: number;
   sessionCount: number;
   isActive: boolean;
+  clockInLocation?: LocationData;
+  clockInSystemLocation?: SystemLocationData;
 }
 
 export interface FirestoreTimeEntry {
@@ -40,6 +45,23 @@ export interface FirestoreTimeEntry {
   clockIn: Timestamp | null;
   clockOut: Timestamp | null;
   totalHours: number | null;
+  clockInLocation?: {
+    latitude: number | null;
+    longitude: number | null;
+    accuracy: number | null;
+    timestamp: Timestamp;
+    address?: string;
+    error?: string;
+  };
+  clockInSystemLocation?: {
+    timezone: string;
+    timezoneOffset: number;
+    language: string;
+    userAgent: string;
+    platform: string;
+    ipAddress?: string;
+    timestamp: Timestamp;
+  };
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
