@@ -162,7 +162,7 @@ const Clock = () => {
   const [mergedEntriesViewMode, setMergedEntriesViewMode] = useState<'grid' | 'list'>('grid');
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
   const [selectedUserSessions, setSelectedUserSessions] = useState<TimeEntry[]>([]);
-  const [selectedUserInfo, setSelectedUserInfo] = useState<{ name: string; email: string; date: Date } | null>(null);
+  const [selectedUserInfo, setSelectedUserInfo] = useState<{ userId: string; name: string; email: string; date: Date } | null>(null);
   
   // Admin edit states
   const [editEntryOpen, setEditEntryOpen] = useState(false);
@@ -730,7 +730,7 @@ const Clock = () => {
     });
     
     setSelectedUserSessions(userSessions);
-    setSelectedUserInfo({ name: userName, email: userEmail, date });
+    setSelectedUserInfo({ userId, name: userName, email: userEmail, date });
     setSessionDetailsOpen(true);
   };
 
@@ -1333,6 +1333,11 @@ const Clock = () => {
 
       await loadAllUsersEntries();
       await loadActiveUsers();
+      
+      // Refresh sessions in modal if open
+      if (selectedUserInfo && selectedUserInfo.userId === userId) {
+        handleShowSessions(userId, selectedUserInfo.name, selectedUserInfo.email, selectedUserInfo.date);
+      }
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -1398,6 +1403,11 @@ const Clock = () => {
 
       await loadAllUsersEntries();
       await loadActiveUsers();
+      
+      // Refresh sessions in modal if open
+      if (selectedUserInfo && selectedUserInfo.userId === userId) {
+        handleShowSessions(userId, selectedUserInfo.name, selectedUserInfo.email, selectedUserInfo.date);
+      }
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -2512,7 +2522,11 @@ const Clock = () => {
                             {paginatedEntries.map((entry, index) => {
                               const isUserActive = activeUsers.some(au => au.userId === entry.userId);
                               return (
-                                <Card key={`${entry.userId}-${format(entry.date, 'yyyy-MM-dd')}-${index}`} className="relative">
+                                <Card 
+                                  key={`${entry.userId}-${format(entry.date, 'yyyy-MM-dd')}-${index}`} 
+                                  className="relative cursor-pointer hover:bg-accent/50 transition-colors"
+                                  onClick={() => handleShowSessions(entry.userId, entry.userName, entry.userEmail, entry.date)}
+                                >
                                   <CardContent className="p-4">
                                     <div className="flex items-start justify-between mb-3">
                                       <div className="flex items-start gap-3 flex-1">
@@ -2527,13 +2541,8 @@ const Clock = () => {
                                           </AvatarFallback>
                                         </Avatar>
                                         <div className="flex-1 min-w-0">
-                                          <button
-                                            onClick={() => handleShowSessions(entry.userId, entry.userName, entry.userEmail, entry.date)}
-                                            className="text-left hover:underline cursor-pointer w-full"
-                                          >
-                                            <h3 className="font-semibold text-base mb-1 truncate">{entry.userName || 'Unknown'}</h3>
-                                            <p className="text-sm text-muted-foreground truncate">{entry.userEmail}</p>
-                                          </button>
+                                          <h3 className="font-semibold text-base mb-1 truncate">{entry.userName || 'Unknown'}</h3>
+                                          <p className="text-sm text-muted-foreground truncate">{entry.userEmail}</p>
                                         </div>
                                       </div>
                                       <div className="flex items-center gap-2">
@@ -2545,31 +2554,6 @@ const Clock = () => {
                                         ) : (
                                           <Badge variant="default">Completed</Badge>
                                         )}
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => isUserActive 
-                                                  ? handleClockOutUser(entry.userId, entry.userName || 'User')
-                                                  : handleClockInUser(entry.userId, entry.userName || 'User')
-                                                }
-                                                disabled={submitting}
-                                                className="h-6 w-6 p-0"
-                                              >
-                                                {isUserActive ? (
-                                                  <LogOut className="h-3 w-3" />
-                                                ) : (
-                                                  <LogIn className="h-3 w-3" />
-                                                )}
-                                              </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                              <p>{isUserActive ? 'Clock out user' : 'Clock in user'}</p>
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
                                       </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
@@ -3560,6 +3544,45 @@ const Clock = () => {
               )}
             </DialogDescription>
           </DialogHeader>
+          {selectedUserInfo && isAdmin && (
+            <div className="mt-4 mb-4 flex justify-end">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={activeUsers.some(au => au.userId === selectedUserInfo.userId) ? "destructive" : "default"}
+                      size="sm"
+                      onClick={() => {
+                        const isUserActive = activeUsers.some(au => au.userId === selectedUserInfo.userId);
+                        if (isUserActive) {
+                          handleClockOutUser(selectedUserInfo.userId, selectedUserInfo.name);
+                        } else {
+                          handleClockInUser(selectedUserInfo.userId, selectedUserInfo.name);
+                        }
+                      }}
+                      disabled={submitting}
+                      className="gap-2"
+                    >
+                      {activeUsers.some(au => au.userId === selectedUserInfo.userId) ? (
+                        <>
+                          <LogOut className="h-4 w-4" />
+                          Clock Out
+                        </>
+                      ) : (
+                        <>
+                          <LogIn className="h-4 w-4" />
+                          Clock In
+                        </>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{activeUsers.some(au => au.userId === selectedUserInfo.userId) ? 'Clock out user' : 'Clock in user'}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
           <div className="mt-4">
             {selectedUserSessions.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
