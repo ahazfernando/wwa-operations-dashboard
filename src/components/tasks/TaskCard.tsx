@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from 'react';
-import { Task, TaskStatus } from '@/types/task';
+import { useState, useRef } from 'react';
+import { Task, TaskStatus, TaskImage } from '@/types/task';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import { updateTaskStatus, updateTaskImages } from '@/lib/tasks';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { Image as ImageIcon, X, Loader2, Camera, GripVertical } from 'lucide-react';
+import { Image as ImageIcon, X, Loader2, Camera, GripVertical, Eye } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface TaskCardProps {
@@ -32,6 +32,7 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAssigned = user && task.assignedMembers.includes(user.id);
 
@@ -45,13 +46,61 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       return;
     }
 
+    // Validate KPI only if Expected KPI is set
+    // Skip this check for collaborative tasks as they have their own completion logic
+    if (newStatus === 'Complete' && !task.collaborative) {
+      // Only validate KPI if Expected KPI is set
+      if (task.expectedKpi !== undefined && task.expectedKpi !== null) {
+        // If Expected KPI is set, Actual KPI must be set and must match
+        if (task.actualKpi === undefined || task.actualKpi === null) {
+          toast({
+            title: 'Cannot complete task',
+            description: 'Please fill in the Actual KPI before completing the task',
+            variant: 'destructive',
+          });
+          return;
+        }
+        
+        // Check if Actual KPI equals Expected KPI
+        if (task.actualKpi !== task.expectedKpi) {
+          toast({
+            title: 'Cannot complete task',
+            description: 'Expected KPI has not been met',
+            variant: 'destructive',
+          });
+          return;
+        }
+      }
+      // If Expected KPI is not set, task can be completed without KPI validation
+    }
+
     try {
       setIsUpdating(true);
-      await updateTaskStatus(task.id, newStatus);
-      toast({
-        title: 'Status updated',
-        description: `Task status changed to ${newStatus}`,
+      await updateTaskStatus(task.id, newStatus, {
+        changedBy: user?.id,
+        changedByName: user?.name,
       });
+      
+      // Show appropriate message for collaborative tasks
+      if (task.collaborative && newStatus === 'Complete') {
+        const userCompleted = task.completedBy?.some(entry => entry.userId === user?.id);
+        if (!userCompleted) {
+          toast({
+            title: 'Your part completed',
+            description: 'You have marked your part as complete. The task will be fully completed when all members finish.',
+          });
+        } else {
+          toast({
+            title: 'Status updated',
+            description: `Task status changed to ${newStatus}`,
+          });
+        }
+      } else {
+        toast({
+          title: 'Status updated',
+          description: `Task status changed to ${newStatus}`,
+        });
+      }
       onStatusChange?.();
     } catch (error: any) {
       toast({
@@ -74,6 +123,35 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       return;
     }
 
+    // Validate file type
+    const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validImageTypes.includes(file.type)) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload an image file (JPEG, PNG, GIF, or WebP)',
+        variant: 'destructive',
+      });
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload an image smaller than 5MB',
+        variant: 'destructive',
+      });
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
     try {
       setIsUploading(true);
       const result = await uploadImageToCloudinary(file);
@@ -85,13 +163,18 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       });
       onStatusChange?.();
     } catch (error: any) {
+      console.error('Image upload error:', error);
       toast({
         title: 'Upload failed',
-        description: error.message || 'Failed to upload image',
+        description: error.message || 'Failed to upload image. Please check your Cloudinary configuration.',
         variant: 'destructive',
       });
     } finally {
       setIsUploading(false);
+      // Reset file input after upload attempt
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -147,6 +230,10 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
       .slice(0, 2);
   };
 
+  const getImageUrl = (image: string | TaskImage): string => {
+    return typeof image === 'string' ? image : image.url;
+  };
+
   return (
     <>
       <Card 
@@ -198,11 +285,11 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
               {task.images.slice(0, 3).map((image, index) => (
                 <div key={index} className="relative group">
                   <img
-                    src={image}
+                    src={getImageUrl(image)}
                     alt={`Task image ${index + 1}`}
                     className="w-16 h-16 object-cover rounded cursor-pointer"
                     onClick={() => {
-                      setSelectedImage(image);
+                      setSelectedImage(getImageUrl(image));
                       setImageDialogOpen(true);
                     }}
                   />
@@ -231,12 +318,22 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
 
           {(isAssigned || canEdit) && (
             <div className="pt-2 border-t" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                <Camera className="h-4 w-4" />
-                <span>Add Image</span>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="h-4 w-4" />
+                    <span>Add Image</span>
+                  </>
+                )}
                 <input
+                  ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -271,6 +368,18 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
               </span>
             </div>
           )}
+
+          <div className="pt-2 border-t" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => onCardClick?.(task)}
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              View Task
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -286,7 +395,7 @@ export function TaskCard({ task, onStatusChange, canEdit = false, onCardClick }:
             {task.images.map((image, index) => (
               <div key={index} className="relative group">
                 <img
-                  src={image}
+                  src={getImageUrl(image)}
                   alt={`Task image ${index + 1}`}
                   className="w-full h-48 object-cover rounded"
                 />

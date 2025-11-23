@@ -1,0 +1,524 @@
+"use client";
+
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Activity, LogOut, Clock, AlertCircle, CheckSquare } from 'lucide-react';
+import { format, formatDistanceToNow } from 'date-fns';
+import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { ActiveUser } from '@/components/clock/types';
+import { formatTime } from '@/components/clock/utils';
+import { getTasksByUser } from '@/lib/tasks';
+import { Task } from '@/types/task';
+
+interface RecentClockOut {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  clockOutTime: Date;
+  clockInTime: Date;
+  entryId: string;
+}
+
+export const ActiveUsersSection = () => {
+  const { user, getAllUsers } = useAuth();
+  const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
+  const [recentClockOuts, setRecentClockOuts] = useState<RecentClockOut[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [profilePhotos, setProfilePhotos] = useState<Record<string, string>>({});
+  const [busyStatus, setBusyStatus] = useState<Record<string, boolean>>({});
+  const [userTasks, setUserTasks] = useState<Record<string, Task | null>>({});
+
+  const getTimeEntryData = (data: unknown): {
+    userId: string;
+    date: Timestamp;
+    dateString?: string;
+    clockIn: Timestamp | null;
+    clockOut: Timestamp | null;
+    totalHours: number | null;
+    createdAt: Timestamp;
+    updatedAt: Timestamp;
+  } => {
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid time entry data');
+    }
+    return data as {
+      userId: string;
+      date: Timestamp;
+      dateString?: string;
+      clockIn: Timestamp | null;
+      clockOut: Timestamp | null;
+      totalHours: number | null;
+      createdAt: Timestamp;
+      updatedAt: Timestamp;
+    };
+  };
+
+  const loadProfilePhoto = async (userId: string): Promise<string | null> => {
+    if (!db) return null;
+    
+    try {
+      const profileDoc = await getDoc(doc(db, 'profiles', userId));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        return data.profilePhoto || null;
+      }
+    } catch (error) {
+      console.error(`Error loading profile photo for user ${userId}:`, error);
+    }
+    return null;
+  };
+
+  const loadBusyStatus = async (userId: string): Promise<boolean> => {
+    if (!db) return false;
+    
+    try {
+      const profileDoc = await getDoc(doc(db, 'profiles', userId));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        return Boolean(data.isBusy);
+      }
+    } catch (error) {
+      console.error(`Error loading busy status for user ${userId}:`, error);
+    }
+    return false;
+  };
+
+  const loadMostRecentActiveTask = async (userId: string): Promise<Task | null> => {
+    try {
+      const tasks = await getTasksByUser(userId);
+      // Filter out completed tasks and get the most recent active task
+      const activeTasks = tasks.filter(task => task.status !== 'Complete');
+      if (activeTasks.length > 0) {
+        // Sort by updatedAt descending to get the most recently updated active task
+        activeTasks.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+        return activeTasks[0];
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error loading most recent active task for user ${userId}:`, error);
+      return null;
+    }
+  };
+
+  const loadActiveUsers = async () => {
+    if (!user || !db) return;
+
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dateString = format(today, 'yyyy-MM-dd');
+
+      // Get all time entries for today
+      const q = query(
+        collection(db, 'timeEntries'),
+        where('dateString', '==', dateString)
+      );
+
+      const querySnapshot = await getDocs(q);
+      const users = await getAllUsers();
+      const userMap = new Map(
+        users.map((u: any) => [
+          u.id,
+          {
+            name: u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
+            email: u.email,
+          },
+        ])
+      );
+
+      const active: ActiveUser[] = [];
+      querySnapshot.docs.forEach((doc) => {
+        try {
+          const data = getTimeEntryData(doc.data());
+          // Check if user is clocked in but not clocked out
+          if (data.clockIn && !data.clockOut) {
+            const userInfo = userMap.get(data.userId);
+            if (userInfo) {
+              active.push({
+                userId: data.userId,
+                userName: userInfo.name,
+                userEmail: userInfo.email,
+                clockInTime: data.clockIn.toDate(),
+                entryId: doc.id,
+              });
+            }
+          }
+        } catch {
+          // Skip invalid entries
+        }
+      });
+
+      // Sort by clock in time (most recent first) and limit to 3
+      active.sort((a, b) => b.clockInTime.getTime() - a.clockInTime.getTime());
+      const limitedActive = active.slice(0, 3);
+      setActiveUsers(limitedActive);
+
+      // Load profile photos, busy status, and most recent active task for active users
+      const photoPromises = limitedActive.map(async (activeUser) => {
+        const [photo, isBusy, task] = await Promise.all([
+          loadProfilePhoto(activeUser.userId),
+          loadBusyStatus(activeUser.userId),
+          loadMostRecentActiveTask(activeUser.userId)
+        ]);
+        return { userId: activeUser.userId, photo, isBusy, task };
+      });
+      const results = await Promise.all(photoPromises);
+      const newPhotos: Record<string, string> = {};
+      const newBusyStatus: Record<string, boolean> = {};
+      const newTasks: Record<string, Task | null> = {};
+      results.forEach(({ userId, photo, isBusy, task }) => {
+        if (photo) {
+          newPhotos[userId] = photo;
+        }
+        newBusyStatus[userId] = isBusy;
+        newTasks[userId] = task;
+      });
+      setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
+      setBusyStatus(prev => ({ ...prev, ...newBusyStatus }));
+      setUserTasks(prev => ({ ...prev, ...newTasks }));
+    } catch (error: any) {
+      console.error('Error loading active users:', error);
+    }
+  };
+
+  const loadRecentClockOuts = async () => {
+    if (!user || !db) return;
+
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dateString = format(today, 'yyyy-MM-dd');
+
+      // Get all time entries for today (we'll filter for clock outs in memory)
+      const q = query(
+        collection(db, 'timeEntries'),
+        where('dateString', '==', dateString)
+      );
+
+      const querySnapshot = await getDocs(q);
+      const users = await getAllUsers();
+      const userMap = new Map(
+        users.map((u: any) => [
+          u.id,
+          {
+            name: u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
+            email: u.email,
+          },
+        ])
+      );
+
+      const recent: RecentClockOut[] = [];
+      querySnapshot.docs.forEach((doc) => {
+        try {
+          const data = getTimeEntryData(doc.data());
+          // Only include entries that have clocked out
+          if (data.clockOut && data.clockIn) {
+            const userInfo = userMap.get(data.userId);
+            if (userInfo) {
+              recent.push({
+                userId: data.userId,
+                userName: userInfo.name,
+                userEmail: userInfo.email,
+                clockOutTime: data.clockOut.toDate(),
+                clockInTime: data.clockIn.toDate(),
+                entryId: doc.id,
+              });
+            }
+          }
+        } catch {
+          // Skip invalid entries
+        }
+      });
+
+      // Sort by clock out time (most recent first) and limit to 3
+      recent.sort((a, b) => b.clockOutTime.getTime() - a.clockOutTime.getTime());
+      const limitedRecent = recent.slice(0, 3);
+      setRecentClockOuts(limitedRecent);
+
+      // Load profile photos and most recent active task for recent clock outs
+      const photoPromises = limitedRecent.map(async (recentUser) => {
+        const [photo, task] = await Promise.all([
+          loadProfilePhoto(recentUser.userId),
+          loadMostRecentActiveTask(recentUser.userId)
+        ]);
+        return { userId: recentUser.userId, photo, task };
+      });
+      const photoResults = await Promise.all(photoPromises);
+      const newPhotos: Record<string, string> = {};
+      const newTasks: Record<string, Task | null> = {};
+      photoResults.forEach(({ userId, photo, task }) => {
+        if (photo) {
+          newPhotos[userId] = photo;
+        }
+        newTasks[userId] = task;
+      });
+      setProfilePhotos(prev => ({ ...prev, ...newPhotos }));
+      setUserTasks(prev => ({ ...prev, ...newTasks }));
+    } catch (error: any) {
+      console.error('Error loading recent clock outs:', error);
+    }
+  };
+
+  const loadData = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      await Promise.all([loadActiveUsers(), loadRecentClockOuts()]);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+    // Refresh every 30 seconds
+    const interval = setInterval(() => {
+      loadData();
+      setCurrentTime(new Date());
+    }, 30000);
+
+    // Update current time every minute for display (only needed for admin)
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(timeInterval);
+    };
+  }, [user]);
+
+  const isAdmin = user?.role === 'admin';
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {/* Active Users Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-green-600" />
+            Active Users
+          </CardTitle>
+          <CardDescription>Users currently clocked in</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 p-3 border rounded-lg">
+                  <Skeleton className="h-10 w-10 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : activeUsers.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>No users currently clocked in</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {activeUsers.map((activeUser) => {
+                const hoursActive =
+                  (currentTime.getTime() - activeUser.clockInTime.getTime()) /
+                  (1000 * 60 * 60);
+                return (
+                  <div
+                    key={activeUser.entryId}
+                    className="flex items-center gap-3 p-3 border rounded-lg bg-green-50 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30 transition-colors"
+                  >
+                    <div className="relative">
+                      <Avatar className="h-10 w-10 border-2 border-green-500">
+                        <AvatarImage 
+                          src={profilePhotos[activeUser.userId] || undefined} 
+                          alt={activeUser.userName}
+                          className="object-cover"
+                        />
+                        <AvatarFallback className="bg-green-500 text-white font-medium">
+                          {getInitials(activeUser.userName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 animate-pulse" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {activeUser.userName}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {activeUser.userEmail}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {busyStatus[activeUser.userId] && (
+                          <Badge variant="destructive" className="text-xs">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Busy
+                          </Badge>
+                        )}
+                        {isAdmin && (
+                          <>
+                            <Badge variant="outline" className="text-xs">
+                              <Clock className="h-3 w-3 mr-1" />
+                              {formatTime(activeUser.clockInTime)}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {Math.round(hoursActive * 100) / 100}h active
+                            </span>
+                          </>
+                        )}
+                        {!isAdmin && (
+                          <Badge variant="outline" className="text-xs bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-300">
+                            Active
+                          </Badge>
+                        )}
+                      </div>
+                      {userTasks[activeUser.userId] && (
+                        <div className="mt-2 pt-2 border-t border-green-200 dark:border-green-800">
+                          <div className="flex items-start gap-2">
+                            <CheckSquare className="h-3 w-3 mt-0.5 text-green-600 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-green-700 dark:text-green-300 truncate">
+                                {userTasks[activeUser.userId]?.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {userTasks[activeUser.userId]?.description || 'No description'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent Clock Outs Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <LogOut className="h-5 w-5 text-blue-600" />
+            Recent Clock Outs
+          </CardTitle>
+          <CardDescription>Users who clocked out recently</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 p-3 border rounded-lg">
+                  <Skeleton className="h-10 w-10 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : recentClockOuts.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <LogOut className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>No recent clock outs today</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {recentClockOuts.map((recent) => {
+                const hoursWorked =
+                  (recent.clockOutTime.getTime() - recent.clockInTime.getTime()) /
+                  (1000 * 60 * 60);
+                return (
+                  <div
+                    key={recent.entryId}
+                    className="flex items-center gap-3 p-3 border rounded-lg hover:bg-accent transition-colors"
+                  >
+                    <Avatar className="h-10 w-10 border-2 border-blue-500">
+                      <AvatarImage 
+                        src={profilePhotos[recent.userId] || undefined} 
+                        alt={recent.userName}
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="bg-blue-500 text-white font-medium">
+                        {getInitials(recent.userName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {recent.userName}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {recent.userEmail}
+                      </p>
+                      {isAdmin && (
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <Badge variant="outline" className="text-xs">
+                            <LogOut className="h-3 w-3 mr-1" />
+                            {formatTime(recent.clockOutTime)}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {Math.round(hoursWorked * 100) / 100}h worked
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDistanceToNow(recent.clockOutTime, {
+                              addSuffix: true,
+                            })}
+                          </span>
+                        </div>
+                      )}
+                      {!isAdmin && (
+                        <div className="mt-1">
+                          <span className="text-xs text-muted-foreground">
+                            {formatDistanceToNow(recent.clockOutTime, {
+                              addSuffix: true,
+                            })}
+                          </span>
+                        </div>
+                      )}
+                      {userTasks[recent.userId] && (
+                        <div className="mt-2 pt-2 border-t">
+                          <div className="flex items-start gap-2">
+                            <CheckSquare className="h-3 w-3 mt-0.5 text-blue-600 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-blue-700 dark:text-blue-300 truncate">
+                                {userTasks[recent.userId]?.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {userTasks[recent.userId]?.description || 'No description'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+

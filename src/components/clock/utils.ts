@@ -28,13 +28,18 @@ export const mergeEntriesByUserAndDate = (entries: TimeEntry[]): MergedTimeEntry
         totalHours: entry.totalHours || 0,
         sessionCount: 1,
         isActive: !entry.clockOut,
+        clockInLocation: entry.clockInLocation,
+        clockInSystemLocation: entry.clockInSystemLocation,
       });
     } else {
       const merged = mergedMap.get(key)!;
       
-      // Update first clock in (earliest)
+      // Update first clock in (earliest) and location from first clock-in
       if (entry.clockIn && (!merged.firstClockIn || entry.clockIn < merged.firstClockIn)) {
         merged.firstClockIn = entry.clockIn;
+        // Update location data from the earliest clock-in
+        merged.clockInLocation = entry.clockInLocation;
+        merged.clockInSystemLocation = entry.clockInSystemLocation;
       }
       
       // Update last clock out (latest)
@@ -61,5 +66,13 @@ export const mergeEntriesByUserAndDate = (entries: TimeEntry[]): MergedTimeEntry
     return (a.userName || '').localeCompare(b.userName || '');
   });
 };
+
+
+
+
+
+
+
+
 
 

@@ -5,24 +5,105 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight } from 'lucide-react';
-import { getTasksByUser } from '@/lib/tasks';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle, Bell, Plus, LogOut, LogIn } from 'lucide-react';
+import { getTasksByUser, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ActiveUsersSection } from '@/components/ActiveUsersSection';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, Timestamp, orderBy, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, getAllUsers } = useAuth();
   const router = useRouter();
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [loadingPhoto, setLoadingPhoto] = useState(true);
+  const [isBusy, setIsBusy] = useState(false);
+  const [loadingBusy, setLoadingBusy] = useState(true);
+  const [recentActivity, setRecentActivity] = useState<{
+    completedTask: Task | null;
+    recentClockOut: { userName: string; clockOutTime: Date } | null;
+    recentClockIn: { userName: string; clockInTime: Date } | null;
+  }>({
+    completedTask: null,
+    recentClockOut: null,
+    recentClockIn: null,
+  });
+  const [loadingActivity, setLoadingActivity] = useState(true);
 
   useEffect(() => {
     if (user) {
       loadAssignedTasks();
+      loadProfilePhoto();
+      loadBusyStatus();
+      loadRecentActivity();
     }
   }, [user]);
+
+  const loadProfilePhoto = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingPhoto(true);
+      const profileDoc = await getDoc(doc(db, 'profiles', user.id));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        if (data.profilePhoto) {
+          setProfilePhoto(data.profilePhoto);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading profile photo:', error);
+    } finally {
+      setLoadingPhoto(false);
+    }
+  };
+
+  const loadBusyStatus = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingBusy(true);
+      const profileDoc = await getDoc(doc(db, 'profiles', user.id));
+      if (profileDoc.exists()) {
+        const data = profileDoc.data();
+        if (data.isBusy !== undefined) {
+          setIsBusy(Boolean(data.isBusy));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading busy status:', error);
+    } finally {
+      setLoadingBusy(false);
+    }
+  };
+
+  const handleBusyToggle = async (checked: boolean) => {
+    if (!user) return;
+    
+    setIsBusy(checked);
+    try {
+      await setDoc(
+        doc(db, 'profiles', user.id),
+        {
+          isBusy: checked,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Error saving busy status:', error);
+      // Revert on error
+      setIsBusy(!checked);
+    }
+  };
 
   const loadAssignedTasks = async () => {
     if (!user) return;
@@ -37,6 +118,152 @@ const Dashboard = () => {
       console.error('Error loading assigned tasks:', error);
     } finally {
       setLoadingTasks(false);
+    }
+  };
+
+  const getTimeEntryData = (data: unknown): {
+    userId: string;
+    date: Timestamp;
+    dateString?: string;
+    clockIn: Timestamp | null;
+    clockOut: Timestamp | null;
+    totalHours: number | null;
+    createdAt: Timestamp;
+    updatedAt: Timestamp;
+  } => {
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid time entry data');
+    }
+    return data as {
+      userId: string;
+      date: Timestamp;
+      dateString?: string;
+      clockIn: Timestamp | null;
+      clockOut: Timestamp | null;
+      totalHours: number | null;
+      createdAt: Timestamp;
+      updatedAt: Timestamp;
+    };
+  };
+
+  const loadRecentActivity = async () => {
+    if (!user || !db) return;
+
+    try {
+      setLoadingActivity(true);
+
+      // Load most recent completed task
+      let completedTask: Task | null = null;
+      try {
+        const completedTasks = user.role === 'admin' 
+          ? await getCompletedTasks()
+          : await getCompletedTasksByUser(user.id);
+        
+        if (completedTasks.length > 0) {
+          // Tasks are already sorted by completion date (most recent first)
+          completedTask = completedTasks[0];
+        }
+      } catch (error) {
+        console.error('Error loading completed task:', error);
+      }
+
+      // Load most recent clock out
+      let recentClockOut: { userName: string; clockOutTime: Date } | null = null;
+      try {
+        // Fetch recent time entries and filter in memory
+        const timeEntriesQuery = query(
+          collection(db, 'timeEntries'),
+          orderBy('updatedAt', 'desc'),
+          limit(50) // Get recent entries to filter
+        );
+        const timeEntriesSnapshot = await getDocs(timeEntriesQuery);
+        
+        const clockOuts: Array<{ userId: string; clockOutTime: Date }> = [];
+        timeEntriesSnapshot.docs.forEach((doc) => {
+          try {
+            const data = getTimeEntryData(doc.data());
+            if (data.clockOut) {
+              clockOuts.push({
+                userId: data.userId,
+                clockOutTime: data.clockOut.toDate(),
+              });
+            }
+          } catch {
+            // Skip invalid entries
+          }
+        });
+
+        if (clockOuts.length > 0) {
+          // Sort by clock out time (most recent first)
+          clockOuts.sort((a, b) => b.clockOutTime.getTime() - a.clockOutTime.getTime());
+          const mostRecent = clockOuts[0];
+          const users = await getAllUsers();
+          const userInfo = users.find((u: any) => u.id === mostRecent.userId);
+          const userName = userInfo 
+            ? (userInfo.name || `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim() || userInfo.email)
+            : 'Unknown User';
+          recentClockOut = {
+            userName,
+            clockOutTime: mostRecent.clockOutTime,
+          };
+        }
+      } catch (error) {
+        console.error('Error loading recent clock out:', error);
+      }
+
+      // Load most recent clock in
+      let recentClockIn: { userName: string; clockInTime: Date } | null = null;
+      try {
+        // Fetch recent time entries and filter in memory
+        const timeEntriesQuery = query(
+          collection(db, 'timeEntries'),
+          orderBy('updatedAt', 'desc'),
+          limit(50) // Get recent entries to filter
+        );
+        const timeEntriesSnapshot = await getDocs(timeEntriesQuery);
+        
+        const clockIns: Array<{ userId: string; clockInTime: Date }> = [];
+        timeEntriesSnapshot.docs.forEach((doc) => {
+          try {
+            const data = getTimeEntryData(doc.data());
+            if (data.clockIn) {
+              clockIns.push({
+                userId: data.userId,
+                clockInTime: data.clockIn.toDate(),
+              });
+            }
+          } catch {
+            // Skip invalid entries
+          }
+        });
+
+        if (clockIns.length > 0) {
+          // Sort by clock in time (most recent first)
+          clockIns.sort((a, b) => b.clockInTime.getTime() - a.clockInTime.getTime());
+          const mostRecent = clockIns[0];
+          const users = await getAllUsers();
+          const userInfo = users.find((u: any) => u.id === mostRecent.userId);
+          const userName = userInfo 
+            ? (userInfo.name || `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim() || userInfo.email)
+            : 'Unknown User';
+          recentClockIn = {
+            userName,
+            clockInTime: mostRecent.clockInTime,
+          };
+        }
+      } catch (error) {
+        console.error('Error loading recent clock in:', error);
+      }
+
+      setRecentActivity({
+        completedTask,
+        recentClockOut,
+        recentClockIn,
+      });
+    } catch (error) {
+      console.error('Error loading recent activity:', error);
+    } finally {
+      setLoadingActivity(false);
     }
   };
 
@@ -60,11 +287,53 @@ const Dashboard = () => {
     }
   };
 
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}</h1>
-        <p className="text-muted-foreground mt-1">We Will Australia Operations Dashboard</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          {loadingPhoto ? (
+            <Skeleton className="h-16 w-16 rounded-full" />
+          ) : (
+            <Avatar className="h-16 w-16">
+              <AvatarImage src={profilePhoto || undefined} alt={user?.name || 'User'} />
+              <AvatarFallback className="text-lg font-semibold">
+                {user?.name ? getInitials(user.name) : 'U'}
+              </AvatarFallback>
+            </Avatar>
+          )}
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.name}</h1>
+            <p className="text-muted-foreground mt-1">We Will Australia Operations Dashboard</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="isBusy"
+              checked={isBusy}
+              onCheckedChange={handleBusyToggle}
+              disabled={loadingBusy}
+            />
+            <Label htmlFor="isBusy" className="text-sm font-medium cursor-pointer">
+              Mark as Busy
+            </Label>
+          </div>
+          {isBusy && (
+            <Badge variant="destructive" className="text-xs">
+              <AlertCircle className="h-3 w-3 mr-1" />
+              Busy
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -89,21 +358,47 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="text-sm space-y-1">
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/clock')}
+              >
                 <Clock className="h-4 w-4" />
                 <span>Clock in/out for time tracking</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/ratings')}
+              >
                 <Star className="h-4 w-4" />
                 <span>Submit weekly ratings</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/leads')}
+              >
                 <Users className="h-4 w-4" />
                 <span>View and manage leads</span>
               </p>
-              <p className="flex items-center gap-2">
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/tasks')}
+              >
                 <CheckSquare className="h-4 w-4" />
                 <span>View assigned tasks</span>
+              </p>
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/reminders')}
+              >
+                <Bell className="h-4 w-4" />
+                <span>Manage reminders</span>
+              </p>
+              <p 
+                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                onClick={() => router.push('/reminders')}
+              >
+                <Plus className="h-4 w-4" />
+                <span>New reminder</span>
               </p>
             </div>
           </CardContent>
@@ -115,32 +410,76 @@ const Dashboard = () => {
             <CardDescription>Latest updates and notifications</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3 text-sm">
-              <div className="flex items-start gap-2">
-                <TrendingUp className="h-4 w-4 mt-0.5 text-green-600" />
-                <div>
-                  <p className="font-medium">New lead added</p>
-                  <p className="text-muted-foreground text-xs">Sydney - 2 hours ago</p>
-                </div>
+            {loadingActivity ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <Skeleton className="h-4 w-4 mt-0.5" />
+                    <div className="flex-1 space-y-1">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-start gap-2">
-                <Star className="h-4 w-4 mt-0.5 text-yellow-600" />
-                <div>
-                  <p className="font-medium">Rating submitted</p>
-                  <p className="text-muted-foreground text-xs">Weekly review - 1 day ago</p>
-                </div>
+            ) : (
+              <div className="space-y-3 text-sm">
+                {recentActivity.completedTask && (
+                  <div className="flex items-start gap-2">
+                    <CheckSquare className="h-4 w-4 mt-0.5 text-green-600" />
+                    <div>
+                      <p className="font-medium">Task completed</p>
+                      <p className="text-muted-foreground text-xs">
+                        {recentActivity.completedTask.name} - {formatDistanceToNow(
+                          recentActivity.completedTask.statusHistory?.find(h => h.status === 'Complete')?.timestamp || 
+                          recentActivity.completedTask.updatedAt,
+                          { addSuffix: true }
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {recentActivity.recentClockOut && (
+                  <div className="flex items-start gap-2">
+                    <LogOut className="h-4 w-4 mt-0.5 text-blue-600" />
+                    <div>
+                      <p className="font-medium">User clocked out</p>
+                      <p className="text-muted-foreground text-xs">
+                        {recentActivity.recentClockOut.userName} - {formatDistanceToNow(
+                          recentActivity.recentClockOut.clockOutTime,
+                          { addSuffix: true }
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {recentActivity.recentClockIn && (
+                  <div className="flex items-start gap-2">
+                    <LogIn className="h-4 w-4 mt-0.5 text-purple-600" />
+                    <div>
+                      <p className="font-medium">User clocked in</p>
+                      <p className="text-muted-foreground text-xs">
+                        {recentActivity.recentClockIn.userName} - {formatDistanceToNow(
+                          recentActivity.recentClockIn.clockInTime,
+                          { addSuffix: true }
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {!recentActivity.completedTask && !recentActivity.recentClockOut && !recentActivity.recentClockIn && (
+                  <div className="text-center py-4 text-muted-foreground text-xs">
+                    No recent activity
+                  </div>
+                )}
               </div>
-              <div className="flex items-start gap-2">
-                <Clock className="h-4 w-4 mt-0.5 text-blue-600" />
-                <div>
-                  <p className="font-medium">Clock in recorded</p>
-                  <p className="text-muted-foreground text-xs">Today at 08:30 AM</p>
-                </div>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Active Users and Recent Clock Outs Section */}
+      <ActiveUsersSection />
 
       {/* Assigned Tasks Section */}
       <Card>
@@ -156,8 +495,20 @@ const Dashboard = () => {
         </CardHeader>
         <CardContent>
           {loadingTasks ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between p-3 border rounded-lg space-x-4">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-5 w-16" />
+                      <Skeleton className="h-4 w-20" />
+                    </div>
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                  <Skeleton className="h-4 w-4" />
+                </div>
+              ))}
             </div>
           ) : assignedTasks.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">

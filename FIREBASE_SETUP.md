@@ -49,9 +49,19 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project_id.appspot.com
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+
+# Resend API Key for email notifications
+RESEND_API_KEY=your_resend_api_key_here
+RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
 Replace the placeholder values with your actual Firebase configuration values.
+
+**Note:** For Resend setup:
+1. Sign up at [Resend](https://resend.com) and get your API key
+2. Add your domain in Resend dashboard (or use the default `onboarding@resend.dev` for testing)
+3. Set `RESEND_FROM_EMAIL` to your verified domain email (e.g., `noreply@yourdomain.com`)
+4. If not set, the system will default to `onboarding@resend.dev` (for testing only)
 
 ## 6. Set up Firestore Security Rules
 

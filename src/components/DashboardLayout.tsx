@@ -29,15 +29,22 @@ import {
   LogOut,
   Settings,
   User,
-  CheckCircle
+  CheckSquare,
+  History,
+  CheckCircle,
+  Bell,
+  MapPin
 } from 'lucide-react';
 
 const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Profile', url: '/profile', icon: User, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Clock In/Out', url: '/clock', icon: ClockIcon, roles: ['admin', 'operationsstaff', 'itteam'] },
+  { title: 'Work From Home Location', url: '/work-from-home', icon: MapPin, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Employee Ratings', url: '/ratings', icon: Star, roles: ['admin', 'operationsstaff'] },
   { title: 'Lead Tracking', url: '/leads', icon: Users, roles: ['admin', 'operationsstaff', 'itteam'] },
+  { title: 'Tasks', url: '/tasks', icon: CheckSquare, roles: ['admin', 'operationsstaff', 'itteam'] },
+  { title: 'Reminders', url: '/reminders', icon: Bell, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Availability', url: '/availability', icon: CheckCircle, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Leave Management', url: '/leave', icon: Calendar, roles: ['admin', 'operationsstaff'], badge: 'Soon' },
   { title: 'SaaS Config', url: '/saas', icon: DollarSign, roles: ['admin'], badge: 'Soon' },
@@ -65,7 +72,18 @@ function AppSidebar() {
       <SidebarContent>
         <div className="p-4 border-b border-sidebar-border">
           {!isCollapsed && (
-            <h2 className="text-lg font-bold text-sidebar-foreground">We Will AU</h2>
+            <img 
+              src="/logos/WWA - White (1).png" 
+              alt="We Will AU" 
+              className="h-8 w-auto object-contain"
+            />
+          )}
+          {isCollapsed && (
+            <img 
+              src="/logos/WWA - White (1).png" 
+              alt="We Will AU" 
+              className="h-8 w-auto object-contain mx-auto"
+            />
           )}
         </div>
 

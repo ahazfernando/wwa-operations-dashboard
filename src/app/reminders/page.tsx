@@ -11,17 +11,21 @@ const DashboardLayout = dynamic(() => import("@/components/DashboardLayout").the
   ssr: false,
 });
 
-const Profile = dynamic(() => import("@/pages/Profile"), {
+const Reminders = dynamic(() => import("@/pages/Reminders"), {
   ssr: false,
 });
 
-export default function ClockPage() {
+export default function RemindersPage() {
   return (
     <ProtectedRoute>
       <DashboardLayout>
-        <Profile />
+        <Reminders />
       </DashboardLayout>
     </ProtectedRoute>
   );
 }
+
+
+
+
 

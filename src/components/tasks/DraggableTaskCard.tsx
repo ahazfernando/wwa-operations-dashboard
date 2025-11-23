@@ -79,6 +79,7 @@ export function DraggableTaskCard({ task, onStatusChange, canEdit, onCardClick }
         task={task}
         onStatusChange={onStatusChange}
         canEdit={canEdit}
+        onCardClick={onCardClick}
       />
     </div>
   );

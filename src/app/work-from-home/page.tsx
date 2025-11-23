@@ -11,15 +11,15 @@ const DashboardLayout = dynamic(() => import("@/components/DashboardLayout").the
   ssr: false,
 });
 
-const Profile = dynamic(() => import("@/pages/Profile"), {
+const WorkFromHome = dynamic(() => import("@/pages/WorkFromHome"), {
   ssr: false,
 });
 
-export default function ClockPage() {
+export default function WorkFromHomePage() {
   return (
     <ProtectedRoute>
       <DashboardLayout>
-        <Profile />
+        <WorkFromHome />
       </DashboardLayout>
     </ProtectedRoute>
   );

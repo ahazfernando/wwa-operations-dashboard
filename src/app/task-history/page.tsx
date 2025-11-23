@@ -11,15 +11,15 @@ const DashboardLayout = dynamic(() => import("@/components/DashboardLayout").the
   ssr: false,
 });
 
-const Profile = dynamic(() => import("@/pages/Profile"), {
+const TaskHistory = dynamic(() => import("@/pages/TaskHistory"), {
   ssr: false,
 });
 
-export default function ClockPage() {
+export default function TaskHistoryPage() {
   return (
     <ProtectedRoute>
       <DashboardLayout>
-        <Profile />
+        <TaskHistory />
       </DashboardLayout>
     </ProtectedRoute>
   );

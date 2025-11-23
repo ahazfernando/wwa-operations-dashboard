@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,14 +9,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { createTask } from '@/lib/tasks';
-import { uploadImageToCloudinary } from '@/lib/cloudinary';
+import { uploadImageToCloudinary, uploadFileToCloudinary } from '@/lib/cloudinary';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, ChevronDown } from 'lucide-react';
+import { CalendarIcon, Plus, Loader2, X, Image as ImageIcon, FileText, ChevronDown, Upload, Clock, Repeat, Search, CheckSquare } from 'lucide-react';
+import { Subtask } from '@/types/task';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
 
 interface User {
   id: string;
@@ -31,6 +34,7 @@ interface CreateTaskDialogProps {
 
 export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps) {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
@@ -42,19 +46,108 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     date: new Date(),
     assignedMembers: [] as string[],
     images: [] as string[],
+    expectedKpi: undefined as number | undefined,
+    actualKpi: undefined as number | undefined,
+    eta: new Date(),
+    time: '09:00',
+    recurring: false,
+    recurringFrequency: [] as string[], // Array of day names or ['all'] for all days
+    recurringDateRange: undefined as { from: Date; to?: Date } | undefined,
+    collaborative: false,
+    subtasks: [] as Subtask[],
   });
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedImageFiles, setSelectedImageFiles] = useState<File[]>([]);
+  const [selectedDocumentFiles, setSelectedDocumentFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
+  const [newSubtaskDescription, setNewSubtaskDescription] = useState('');
+  const [subtaskImageFiles, setSubtaskImageFiles] = useState<{ [subtaskId: string]: File[] }>({});
+  const [subtaskDocumentFiles, setSubtaskDocumentFiles] = useState<{ [subtaskId: string]: File[] }>({});
+  const [subtaskImagePreviews, setSubtaskImagePreviews] = useState<{ [subtaskId: string]: string[] }>({});
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  // Reset ETA to current date when dialog opens
+  useEffect(() => {
+    if (open) {
+      setFormData(prev => ({ ...prev, eta: new Date(), recurringDateRange: undefined }));
+    } else {
+      // Reset file selections when dialog closes
+      setSelectedImageFiles([]);
+      setSelectedDocumentFiles([]);
+      setImagePreviews([]);
+      setNewSubtaskDescription('');
+      setSubtaskImageFiles({});
+      setSubtaskDocumentFiles({});
+      setSubtaskImagePreviews({});
+    }
+  }, [open]);
+
+  const addSubtask = () => {
+    if (!newSubtaskDescription.trim()) {
+      toast({
+        title: 'Validation error',
+        description: 'Please enter a subtask description',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const newSubtask: Subtask = {
+      id: Date.now().toString(),
+      description: newSubtaskDescription.trim(),
+      addedAt: new Date(),
+      completed: false,
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      subtasks: [...prev.subtasks, newSubtask],
+    }));
+
+    setNewSubtaskDescription('');
+  };
+
+  const toggleSubtaskCompletion = (subtaskId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      subtasks: prev.subtasks.map(subtask => {
+        if (subtask.id === subtaskId) {
+          return {
+            ...subtask,
+            completed: !subtask.completed,
+            completedAt: !subtask.completed ? new Date() : undefined,
+          };
+        }
+        return subtask;
+      }),
+    }));
+  };
+
+  const removeSubtask = (subtaskId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      subtasks: prev.subtasks.filter(subtask => subtask.id !== subtaskId),
+    }));
+    // Clean up associated files
+    const newImageFiles = { ...subtaskImageFiles };
+    const newDocumentFiles = { ...subtaskDocumentFiles };
+    const newImagePreviews = { ...subtaskImagePreviews };
+    delete newImageFiles[subtaskId];
+    delete newDocumentFiles[subtaskId];
+    delete newImagePreviews[subtaskId];
+    setSubtaskImageFiles(newImageFiles);
+    setSubtaskDocumentFiles(newDocumentFiles);
+    setSubtaskImagePreviews(newImagePreviews);
+  };
+
+  const handleSubtaskImageSelect = (subtaskId: string, files: File[]) => {
     if (files.length === 0) return;
 
-    // Validate file types
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     const invalidFiles = files.filter(file => !validTypes.includes(file.type));
-    
+
     if (invalidFiles.length > 0) {
       toast({
         title: 'Invalid file type',
@@ -64,7 +157,6 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
       return;
     }
 
-    // Validate file sizes (max 5MB per file)
     const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
     if (largeFiles.length > 0) {
       toast({
@@ -75,9 +167,133 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
       return;
     }
 
-    setSelectedFiles(prev => [...prev, ...files]);
-    
-    // Create previews
+    const currentFiles = subtaskImageFiles[subtaskId] || [];
+    if (currentFiles.length + files.length > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 image files per subtask',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubtaskImageFiles(prev => ({
+      ...prev,
+      [subtaskId]: [...(prev[subtaskId] || []), ...files],
+    }));
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSubtaskImagePreviews(prev => ({
+          ...prev,
+          [subtaskId]: [...(prev[subtaskId] || []), reader.result as string],
+        }));
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleSubtaskDocumentSelect = (subtaskId: string, files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['application/pdf'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only PDF files',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const currentFiles = subtaskDocumentFiles[subtaskId] || [];
+    if (currentFiles.length + files.length > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 document files per subtask',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubtaskDocumentFiles(prev => ({
+      ...prev,
+      [subtaskId]: [...(prev[subtaskId] || []), ...files],
+    }));
+  };
+
+  const removeSubtaskImage = (subtaskId: string, index: number) => {
+    const newFiles = { ...subtaskImageFiles };
+    const newPreviews = { ...subtaskImagePreviews };
+    if (newFiles[subtaskId]) {
+      newFiles[subtaskId] = newFiles[subtaskId].filter((_, i) => i !== index);
+    }
+    if (newPreviews[subtaskId]) {
+      newPreviews[subtaskId] = newPreviews[subtaskId].filter((_, i) => i !== index);
+    }
+    setSubtaskImageFiles(newFiles);
+    setSubtaskImagePreviews(newPreviews);
+  };
+
+  const removeSubtaskDocument = (subtaskId: string, index: number) => {
+    const newFiles = { ...subtaskDocumentFiles };
+    if (newFiles[subtaskId]) {
+      newFiles[subtaskId] = newFiles[subtaskId].filter((_, i) => i !== index);
+    }
+    setSubtaskDocumentFiles(newFiles);
+  };
+
+  const validateAndAddImages = (files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only image files (JPEG, PNG, GIF, WebP)',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check total file limit (max 2 files)
+    const totalFiles = selectedImageFiles.length + files.length;
+    if (totalFiles > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 image files allowed',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSelectedImageFiles(prev => [...prev, ...files]);
+
     files.forEach(file => {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -87,9 +303,104 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
     });
   };
 
+  const validateAndAddDocumentFiles = (files: File[]) => {
+    if (files.length === 0) return;
+
+    const validTypes = ['application/pdf'];
+    const invalidFiles = files.filter(file => !validTypes.includes(file.type));
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please upload only PDF files',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const largeFiles = files.filter(file => file.size > 5 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: 'Please upload files smaller than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check total file limit (max 2 files)
+    const totalFiles = selectedDocumentFiles.length + files.length;
+    if (totalFiles > 2) {
+      toast({
+        title: 'Too many files',
+        description: 'Maximum 2 document files allowed',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSelectedDocumentFiles(prev => [...prev, ...files]);
+  };
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    validateAndAddImages(files);
+  };
+
+  const handleDocumentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    validateAndAddDocumentFiles(files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    validateAndAddImages(files);
+  };
+
+  const handleDragOverFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(true);
+  };
+
+  const handleDragLeaveFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+  };
+
+  const handleDropFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    validateAndAddDocumentFiles(files);
+  };
+
   const removeImage = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    setSelectedImageFiles(prev => prev.filter((_, i) => i !== index));
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const removeDocumentFile = (index: number) => {
+    setSelectedDocumentFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleMemberToggle = (userId: string) => {
@@ -128,7 +439,8 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
 
       // Upload images to Cloudinary
       const uploadedImages: string[] = [];
-      for (const file of selectedFiles) {
+      
+      for (const file of selectedImageFiles) {
         try {
           const result = await uploadImageToCloudinary(file);
           uploadedImages.push(result.url);
@@ -136,11 +448,74 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           console.error('Error uploading image:', error);
           toast({
             title: 'Image upload failed',
-            description: `Failed to upload ${file.name}. Continuing with other images...`,
+            description: `Failed to upload ${file.name}. Continuing with other files...`,
             variant: 'destructive',
           });
         }
       }
+
+      // Upload document files to Cloudinary
+      const uploadedFiles: Array<{ url: string; name: string }> = [];
+      
+      for (const file of selectedDocumentFiles) {
+        try {
+          const result = await uploadFileToCloudinary(file);
+          uploadedFiles.push({ url: result.url, name: file.name });
+        } catch (error: any) {
+          console.error('Error uploading file:', error);
+          toast({
+            title: 'File upload failed',
+            description: `Failed to upload ${file.name}. Continuing with other files...`,
+            variant: 'destructive',
+          });
+        }
+      }
+
+      // Upload subtask images and files
+      const subtasksWithAttachments = await Promise.all(
+        formData.subtasks.map(async (subtask) => {
+          const subtaskImages: string[] = [];
+          const subtaskFiles: Array<{ url: string; name: string }> = [];
+
+          // Upload images for this subtask
+          const imageFiles = subtaskImageFiles[subtask.id] || [];
+          for (const file of imageFiles) {
+            try {
+              const result = await uploadImageToCloudinary(file);
+              subtaskImages.push(result.url);
+            } catch (error: any) {
+              console.error('Error uploading subtask image:', error);
+              toast({
+                title: 'Image upload failed',
+                description: `Failed to upload image for subtask. Continuing...`,
+                variant: 'destructive',
+              });
+            }
+          }
+
+          // Upload files for this subtask
+          const documentFiles = subtaskDocumentFiles[subtask.id] || [];
+          for (const file of documentFiles) {
+            try {
+              const result = await uploadFileToCloudinary(file);
+              subtaskFiles.push({ url: result.url, name: file.name });
+            } catch (error: any) {
+              console.error('Error uploading subtask file:', error);
+              toast({
+                title: 'File upload failed',
+                description: `Failed to upload file for subtask. Continuing...`,
+                variant: 'destructive',
+              });
+            }
+          }
+
+          return {
+            ...subtask,
+            images: subtaskImages.length > 0 ? subtaskImages : undefined,
+            files: subtaskFiles.length > 0 ? subtaskFiles : undefined,
+          };
+        })
+      );
 
       setUploadingImages(false);
 
@@ -149,6 +524,41 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         const user = users.find(u => u.id === userId);
         return user?.name || '';
       }).filter(Boolean);
+
+      // Validate recurring frequency if recurring is enabled
+      if (formData.recurring && formData.recurringFrequency.length === 0) {
+        toast({
+          title: 'Validation error',
+          description: 'Please select recurring frequency (All Days or specific days)',
+          variant: 'destructive',
+        });
+        setLoading(false);
+        setUploadingImages(false);
+        return;
+      }
+
+      // Validate recurring date range if recurring is enabled
+      if (formData.recurring && (!formData.recurringDateRange || !formData.recurringDateRange.from)) {
+        toast({
+          title: 'Validation error',
+          description: 'Please select a date range for the recurring task',
+          variant: 'destructive',
+        });
+        setLoading(false);
+        setUploadingImages(false);
+        return;
+      }
+
+      if (formData.recurring && formData.recurringDateRange && !formData.recurringDateRange.to) {
+        toast({
+          title: 'Validation error',
+          description: 'Please select an end date for the recurring task',
+          variant: 'destructive',
+        });
+        setLoading(false);
+        setUploadingImages(false);
+        return;
+      }
 
       // Create task
       await createTask({
@@ -159,8 +569,19 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         assignedMembers: formData.assignedMembers,
         assignedMemberNames,
         images: uploadedImages,
+        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+        expectedKpi: formData.expectedKpi,
+        actualKpi: formData.actualKpi,
+        eta: formData.eta,
+        time: formData.time || undefined,
         createdBy: user?.id || '',
         createdByName: user?.name || '',
+        recurring: formData.recurring,
+        recurringFrequency: formData.recurring ? formData.recurringFrequency : undefined,
+        recurringStartDate: formData.recurring && formData.recurringDateRange?.from ? formData.recurringDateRange.from : undefined,
+        recurringEndDate: formData.recurring && formData.recurringDateRange?.to ? formData.recurringDateRange.to : undefined,
+        collaborative: formData.collaborative,
+        subtasks: subtasksWithAttachments,
       });
 
       toast({
@@ -176,9 +597,24 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
         date: new Date(),
         assignedMembers: [],
         images: [],
+        expectedKpi: undefined,
+        actualKpi: undefined,
+        eta: new Date(),
+        time: '09:00',
+        recurring: false,
+        recurringFrequency: [],
+        recurringDateRange: undefined,
+        collaborative: false,
+        subtasks: [],
       });
-      setSelectedFiles([]);
+      setSelectedImageFiles([]);
+      setSelectedDocumentFiles([]);
       setImagePreviews([]);
+      setMemberSearchQuery('');
+      setNewSubtaskDescription('');
+      setSubtaskImageFiles({});
+      setSubtaskDocumentFiles({});
+      setSubtaskImagePreviews({});
       setOpen(false);
       onTaskCreated?.();
     } catch (error: any) {
@@ -201,14 +637,54 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           Create Task
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Create New Task</DialogTitle>
-          <DialogDescription>
-            Create a new task and assign it to team members
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <DialogContent 
+        className="max-w-5xl max-h-[90vh] overflow-hidden p-0 !grid-cols-1 gap-0 !bg-transparent"
+        style={{ backgroundColor: 'transparent' }}
+      >
+        <div className="grid md:grid-cols-2 grid-cols-1 w-full border rounded-lg overflow-hidden">
+          {/* Left side with background image and logo */}
+          <div className="relative hidden md:block overflow-hidden min-h-[600px] flex flex-col">
+            <div className="absolute inset-0 z-0">
+              <Image
+                src="/modalimages/eed0e449f25f0b6ea226cd6039f6a135.jpg"
+                alt="Task modal background"
+                fill
+                className="object-cover"
+                priority
+              />
+            </div>
+            <div className="relative z-10 h-full flex flex-col justify-between p-8">
+              {/* Logo at top left */}
+              <div>
+                <Image
+                  src="/logos/WWA - White (1).png"
+                  alt="We Will Australia Logo"
+                  width={120}
+                  height={120}
+                  className="object-contain"
+                  priority
+                />
+              </div>
+              {/* Title and content at bottom */}
+              <div className="text-white space-y-2">
+                <h2 className="text-2xl font-bold">Create New Task</h2>
+                <p className="text-sm text-white/80">
+                  Create a new task and assign it to team members. Fill in the task details below to get started.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right side with form content */}
+          <div className="relative bg-background rounded-r-lg overflow-y-auto max-h-[90vh]">
+            <div className="p-6">
+              <DialogHeader>
+                <DialogTitle className="text-2xl">Create New Task</DialogTitle>
+                <DialogDescription>
+                  Create a new task and assign it to team members. Fill in the task details below to get started.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-4 mt-6">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="taskId">Task ID *</Label>
@@ -270,6 +746,239 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="expectedKpi">Expected KPI</Label>
+            <Input
+              id="expectedKpi"
+              type="number"
+              step="0.01"
+              placeholder="e.g., 95"
+              value={formData.expectedKpi ?? ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFormData(prev => ({ 
+                  ...prev, 
+                  expectedKpi: value === '' ? undefined : parseFloat(value) 
+                }));
+              }}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="eta">ETA</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !formData.eta && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {formData.eta ? format(formData.eta, "PPP") : "Pick ETA date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={formData.eta}
+                    onSelect={(date) => setFormData(prev => ({ ...prev, eta: date }))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="time">Time</Label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="time"
+                  type="text"
+                  placeholder="e.g., 09:00 AM"
+                  value={formData.time}
+                  onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recurring">Recurring Task</Label>
+              <Select
+                value={formData.recurring ? 'yes' : 'no'}
+                onValueChange={(value) => {
+                  const isRecurring = value === 'yes';
+                  setFormData(prev => ({ 
+                    ...prev, 
+                    recurring: isRecurring,
+                    recurringFrequency: isRecurring ? prev.recurringFrequency : []
+                  }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select option" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no">No</SelectItem>
+                  <SelectItem value="yes">Yes</SelectItem>
+                </SelectContent>
+              </Select>
+              {formData.recurring && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Repeat className="h-3 w-3" />
+                  This task will automatically recreate when completed
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="collaborative">Collaborative Task</Label>
+            <Select
+              value={formData.collaborative ? 'yes' : 'no'}
+              onValueChange={(value) => {
+                setFormData(prev => ({ 
+                  ...prev, 
+                  collaborative: value === 'yes'
+                }));
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">No</SelectItem>
+                <SelectItem value="yes">Yes</SelectItem>
+              </SelectContent>
+            </Select>
+            {formData.collaborative && (
+              <p className="text-xs text-muted-foreground">
+                All assigned members must complete this task for it to be marked as fully completed
+              </p>
+            )}
+          </div>
+
+          {formData.recurring && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="recurringDateRange">Recurring Date Range *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !formData.recurringDateRange?.from && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formData.recurringDateRange?.from ? (
+                        formData.recurringDateRange.to ? (
+                          <>
+                            {format(formData.recurringDateRange.from, "LLL dd, y")} -{" "}
+                            {format(formData.recurringDateRange.to, "LLL dd, y")}
+                          </>
+                        ) : (
+                          format(formData.recurringDateRange.from, "LLL dd, y")
+                        )
+                      ) : (
+                        <span>Select date range</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="range"
+                      defaultMonth={formData.recurringDateRange?.from}
+                      selected={formData.recurringDateRange}
+                      onSelect={(range) => setFormData(prev => ({ ...prev, recurringDateRange: range }))}
+                      numberOfMonths={2}
+                      initialFocus
+                    />
+                    {formData.recurringDateRange && (
+                      <div className="p-3 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => setFormData(prev => ({ ...prev, recurringDateRange: undefined }))}
+                        >
+                          Clear date range
+                        </Button>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <p className="text-xs text-muted-foreground">
+                  Select when the recurring task should start and end
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="recurringFrequency">Recurring Frequency *</Label>
+                <Select
+                  value={formData.recurringFrequency.includes('all') ? 'all' : formData.recurringFrequency.length > 0 ? 'custom' : 'custom'}
+                  onValueChange={(value) => {
+                    if (value === 'all') {
+                      setFormData(prev => ({ ...prev, recurringFrequency: ['all'] }));
+                    } else {
+                      // When "Select Days" is chosen, keep existing selections or start with empty array
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        recurringFrequency: prev.recurringFrequency.includes('all') ? [] : prev.recurringFrequency
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select frequency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Days</SelectItem>
+                    <SelectItem value="custom">Select Days</SelectItem>
+                  </SelectContent>
+                </Select>
+                {!formData.recurringFrequency.includes('all') && (
+                  <div className="space-y-2 mt-2">
+                    <Label className="text-sm text-muted-foreground">Select specific days:</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                        <div key={day} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`day-${day}`}
+                            checked={formData.recurringFrequency.includes(day)}
+                            onCheckedChange={(checked) => {
+                              setFormData(prev => ({
+                                ...prev,
+                                recurringFrequency: checked
+                                  ? [...prev.recurringFrequency, day]
+                                  : prev.recurringFrequency.filter(d => d !== day)
+                              }));
+                            }}
+                          />
+                          <label
+                            htmlFor={`day-${day}`}
+                            className="text-sm font-medium leading-none cursor-pointer"
+                          >
+                            {day}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                    {formData.recurringFrequency.length === 0 && (
+                      <p className="text-xs text-muted-foreground">Please select at least one day or choose 'All Days'</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          <div className="space-y-2">
             <Label>Assign Members *</Label>
             <Popover>
               <PopoverTrigger asChild>
@@ -289,28 +998,74 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
                   <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[400px] p-0" align="start">
-                <ScrollArea className="h-64">
+              <PopoverContent className="w-[400px] p-0" align="start" onWheel={(e) => e.stopPropagation()}>
+                <div className="p-3 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search members..."
+                      value={memberSearchQuery}
+                      onChange={(e) => setMemberSearchQuery(e.target.value)}
+                      className="pl-10"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                </div>
+                <div 
+                  className="max-h-64 overflow-y-auto overscroll-contain"
+                  style={{ maxHeight: '16rem' }}
+                  tabIndex={0}
+                  onWheel={(e) => {
+                    e.stopPropagation();
+                    const target = e.currentTarget;
+                    const { scrollTop, scrollHeight, clientHeight } = target;
+                    const maxScroll = scrollHeight - clientHeight;
+                    const newScrollTop = Math.max(0, Math.min(maxScroll, scrollTop + e.deltaY));
+                    target.scrollTop = newScrollTop;
+                    e.preventDefault();
+                  }}
+                >
                   <div className="p-2">
                     <div className="space-y-2">
-                      {users.map((user) => (
-                        <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
-                          <Checkbox
-                            id={`member-${user.id}`}
-                            checked={formData.assignedMembers.includes(user.id)}
-                            onCheckedChange={() => handleMemberToggle(user.id)}
-                          />
-                          <label
-                            htmlFor={`member-${user.id}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                          >
-                            {user.name} ({user.email})
-                          </label>
+                      {users
+                        .filter((user) => {
+                          if (!memberSearchQuery.trim()) return true;
+                          const query = memberSearchQuery.toLowerCase();
+                          return (
+                            user.name.toLowerCase().includes(query) ||
+                            user.email.toLowerCase().includes(query)
+                          );
+                        })
+                        .map((user) => (
+                          <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
+                            <Checkbox
+                              id={`member-${user.id}`}
+                              checked={formData.assignedMembers.includes(user.id)}
+                              onCheckedChange={() => handleMemberToggle(user.id)}
+                            />
+                            <label
+                              htmlFor={`member-${user.id}`}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                            >
+                              {user.name}
+                            </label>
+                          </div>
+                        ))}
+                      {users.filter((user) => {
+                        if (!memberSearchQuery.trim()) return false;
+                        const query = memberSearchQuery.toLowerCase();
+                        return (
+                          user.name.toLowerCase().includes(query) ||
+                          user.email.toLowerCase().includes(query)
+                        );
+                      }).length === 0 && (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          No members found
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
-                </ScrollArea>
+                </div>
               </PopoverContent>
             </Popover>
             {formData.assignedMembers.length === 0 && (
@@ -319,38 +1074,324 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="images">Images</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="images"
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleFileSelect}
-                disabled={uploadingImages}
-              />
-              <ImageIcon className="h-4 w-4 text-muted-foreground" />
-            </div>
-            {imagePreviews.length > 0 && (
-              <div className="grid grid-cols-4 gap-2 mt-2">
-                {imagePreviews.map((preview, index) => (
-                  <div key={index} className="relative group">
-                    <img
-                      src={preview}
-                      alt={`Preview ${index + 1}`}
-                      className="w-full h-20 object-cover rounded"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(index)}
-                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+            <Label>Subtasks</Label>
+            {!isAdmin && (
+              <p className="text-xs text-muted-foreground">Only admins can create subtasks</p>
             )}
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter subtask description"
+                    value={newSubtaskDescription}
+                    onChange={(e) => setNewSubtaskDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addSubtask();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addSubtask}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add
+                  </Button>
+                </div>
+              )}
+              {formData.subtasks.length > 0 && (
+                <div className="space-y-3 border rounded-lg p-3">
+                  {formData.subtasks.map((subtask) => {
+                    const subtaskImageFilesList = subtaskImageFiles[subtask.id] || [];
+                    const subtaskDocumentFilesList = subtaskDocumentFiles[subtask.id] || [];
+                    const subtaskImagePreviewsList = subtaskImagePreviews[subtask.id] || [];
+                    return (
+                      <div
+                        key={subtask.id}
+                        className="space-y-2 p-3 border rounded-md bg-card"
+                      >
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={subtask.completed}
+                            onCheckedChange={() => toggleSubtaskCompletion(subtask.id)}
+                            className="mt-1"
+                          />
+                          <div className="flex-1 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <p className={cn(
+                                "text-sm flex-1",
+                                subtask.completed && "line-through text-muted-foreground"
+                              )}>
+                                {subtask.description}
+                              </p>
+                              {isAdmin && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeSubtask(subtask.id)}
+                                  className="h-6 w-6 p-0"
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                Added: {format(subtask.addedAt, 'MMM dd, yyyy HH:mm')}
+                              </span>
+                              {subtask.completed && subtask.completedAt && (
+                                <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                  <CheckSquare className="h-3 w-3" />
+                                  Completed: {format(subtask.completedAt, 'MMM dd, yyyy HH:mm')}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Subtask Images */}
+                            {subtaskImagePreviewsList.length > 0 && (
+                              <div className="flex gap-2 flex-wrap mt-2">
+                                {subtaskImagePreviewsList.map((preview, index) => (
+                                  <div key={index} className="relative group">
+                                    <img
+                                      src={preview}
+                                      alt={`Subtask preview ${index + 1}`}
+                                      className="w-16 h-16 object-cover rounded"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeSubtaskImage(subtask.id, index)}
+                                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Subtask Files */}
+                            {subtaskDocumentFilesList.length > 0 && (
+                              <div className="space-y-1 mt-2">
+                                {subtaskDocumentFilesList.map((file, index) => (
+                                  <div key={index} className="flex items-center gap-2 p-2 border rounded bg-muted/50">
+                                    <FileText className="h-4 w-4 text-muted-foreground" />
+                                    <span className="text-xs flex-1">{file.name}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeSubtaskDocument(subtask.id, index)}
+                                      className="text-red-500 hover:text-red-700"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Subtask Attachment Buttons */}
+                            {isAdmin && (
+                              <div className="flex gap-2 mt-2">
+                                <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                                  <ImageIcon className="h-3 w-3" />
+                                  <span>Add Image</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={(e) => {
+                                      const files = Array.from(e.target.files || []);
+                                      handleSubtaskImageSelect(subtask.id, files);
+                                      e.target.value = '';
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                                  <FileText className="h-3 w-3" />
+                                  <span>Add File</span>
+                                  <input
+                                    type="file"
+                                    accept="application/pdf"
+                                    multiple
+                                    onChange={(e) => {
+                                      const files = Array.from(e.target.files || []);
+                                      handleSubtaskDocumentSelect(subtask.id, files);
+                                      e.target.value = '';
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Attachments</Label>
+            <Tabs defaultValue="images" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="images">
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Images
+                </TabsTrigger>
+                <TabsTrigger value="files">
+                  <FileText className="h-4 w-4 mr-2" />
+                  Files
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="images" className="space-y-4">
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={cn(
+                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                    isDragging
+                      ? "border-primary bg-primary/10"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  )}
+                  onClick={() => document.getElementById('images-input')?.click()}
+                >
+                  <input
+                    id="images-input"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageFileSelect}
+                    disabled={uploadingImages}
+                    className="hidden"
+                  />
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="rounded-full border-2 border-muted-foreground/50 p-3">
+                      <Upload className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Drag & drop images here</p>
+                      <p className="text-xs text-muted-foreground">
+                        Or click to browse (max 2 files, up to 5MB each)
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        document.getElementById('images-input')?.click();
+                      }}
+                      disabled={uploadingImages}
+                    >
+                      Browse images
+                    </Button>
+                  </div>
+                </div>
+                {imagePreviews.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2 mt-2">
+                    {imagePreviews.map((preview, index) => (
+                      <div key={index} className="relative group">
+                        <img
+                          src={preview}
+                          alt={`Preview ${index + 1}`}
+                          className="w-full h-20 object-cover rounded"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeImage(index)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="files" className="space-y-4">
+                <div
+                  onDragOver={handleDragOverFiles}
+                  onDragLeave={handleDragLeaveFiles}
+                  onDrop={handleDropFiles}
+                  className={cn(
+                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                    isDraggingFiles
+                      ? "border-primary bg-primary/10"
+                      : "border-muted-foreground/25 hover:border-muted-foreground/50"
+                  )}
+                  onClick={() => document.getElementById('files-input')?.click()}
+                >
+                  <input
+                    id="files-input"
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    onChange={handleDocumentFileSelect}
+                    disabled={uploadingImages}
+                    className="hidden"
+                  />
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="rounded-full border-2 border-muted-foreground/50 p-3">
+                      <Upload className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Drag & drop PDF files here</p>
+                      <p className="text-xs text-muted-foreground">
+                        Or click to browse (max 2 files, up to 5MB each)
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        document.getElementById('files-input')?.click();
+                      }}
+                      disabled={uploadingImages}
+                    >
+                      Browse files
+                    </Button>
+                  </div>
+                </div>
+                {selectedDocumentFiles.length > 0 && (
+                  <div className="space-y-2 mt-2">
+                    {selectedDocumentFiles.map((file, index) => (
+                      <div key={index} className="relative group p-4 border rounded-lg bg-muted/50">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-8 w-8 text-muted-foreground" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{file.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {(file.size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeDocumentFile(index)}
+                            className="bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
@@ -366,7 +1407,7 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
               {loading || uploadingImages ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {uploadingImages ? 'Uploading images...' : 'Creating...'}
+                  {uploadingImages ? 'Uploading files...' : 'Creating...'}
                 </>
               ) : (
                 'Create Task'
@@ -374,6 +1415,9 @@ export function CreateTaskDialog({ users, onTaskCreated }: CreateTaskDialogProps
             </Button>
           </div>
         </form>
+            </div>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
