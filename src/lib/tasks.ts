@@ -113,6 +113,7 @@ export function convertFirestoreTask(docData: any, docId: string): Task {
     collaborative: docData.collaborative || false,
     completedBy: completedBy.length > 0 ? completedBy : undefined,
     subtasks: subtasks.length > 0 ? subtasks : undefined,
+    order: docData.order !== undefined && docData.order !== null ? docData.order : undefined,
   };
 }
 
@@ -182,6 +183,7 @@ export async function createTask(taskData: {
       parentTaskId: taskData.parentTaskId || null,
       collaborative: taskData.collaborative || false,
       completedBy: [],
+      order: null, // Will be set when task is first displayed/reordered
       subtasks: taskData.subtasks ? taskData.subtasks.map(subtask => {
         const sanitizedSubtaskImages = subtask.images ? sanitizeImages(subtask.images) : null;
         const sanitizedSubtaskFiles = subtask.files ? sanitizeFiles(subtask.files) : null;
@@ -768,6 +770,52 @@ export async function deleteTask(taskId: string): Promise<void> {
     await deleteDoc(doc(db, 'tasks', taskId));
   } catch (error) {
     console.error('Error deleting task:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update task order within a status
+ */
+export async function updateTaskOrder(taskId: string, order: number): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
+  try {
+    await updateDoc(doc(db, 'tasks', taskId), {
+      order,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error updating task order:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reorder tasks within a status column
+ * Updates the order of multiple tasks at once
+ */
+export async function reorderTasksInStatus(
+  status: TaskStatus,
+  taskOrders: { taskId: string; order: number }[]
+): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized. Please check your environment variables.');
+  }
+  try {
+    const now = Timestamp.now();
+    // Update all tasks in parallel
+    await Promise.all(
+      taskOrders.map(({ taskId, order }) =>
+        updateDoc(doc(db, 'tasks', taskId), {
+          order,
+          updatedAt: now,
+        })
+      )
+    );
+  } catch (error) {
+    console.error('Error reordering tasks:', error);
     throw error;
   }
 }

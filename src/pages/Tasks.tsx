@@ -11,7 +11,7 @@ import { DraggableTaskCard } from '@/components/tasks/DraggableTaskCard';
 import { DroppableColumn } from '@/components/tasks/DroppableColumn';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { TaskDetailsDialog } from '@/components/tasks/TaskDetailsDialog';
-import { getAllTasks, getTasksByUser, updateTaskStatus, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
+import { getAllTasks, getTasksByUser, updateTaskStatus, getCompletedTasks, getCompletedTasksByUser, reorderTasksInStatus, updateTaskOrder } from '@/lib/tasks';
 import { Task, TaskStatus } from '@/types/task';
 import { toast } from '@/hooks/use-toast';
 import { Plus, Search, CalendarIcon, X, CheckCircle2, Download, Users, UsersRound } from 'lucide-react';
@@ -35,6 +35,7 @@ import {
   useSensors,
   closestCorners,
 } from '@dnd-kit/core';
+import { arrayMove } from '@dnd-kit/sortable';
 
 const Tasks = () => {
   const { user, getAllUsers: fetchAllUsers } = useAuth();
@@ -213,12 +214,14 @@ const Tasks = () => {
   }, [tasks, searchQuery, dateRange, selectedEmployee, showCollaborativeOnly, isAdmin]);
 
   const getTasksByStatus = (status: TaskStatus): Task[] => {
+    let tasks: Task[] = [];
+    
     if (status === 'Complete') {
       // For completed tasks, only show those completed within the last 24 hours
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       
-      return filteredTasks.filter(task => {
+      tasks = filteredTasks.filter(task => {
         if (task.status !== 'Complete') return false;
         
         // Get completion date from status history
@@ -228,10 +231,23 @@ const Tasks = () => {
         // Only show if completed within the last 24 hours
         return completionDate >= oneDayAgo;
       });
+    } else {
+      // For other statuses, filter normally
+      tasks = filteredTasks.filter(task => task.status === status);
     }
     
-    // For other statuses, filter normally
-    return filteredTasks.filter(task => task.status === status);
+    // Sort by order (if available), then by createdAt descending
+    return tasks.sort((a, b) => {
+      // If both have order, sort by order
+      if (a.order !== undefined && a.order !== null && b.order !== undefined && b.order !== null) {
+        return a.order - b.order;
+      }
+      // If only one has order, prioritize it
+      if (a.order !== undefined && a.order !== null) return -1;
+      if (b.order !== undefined && b.order !== null) return 1;
+      // Otherwise, sort by createdAt descending
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -264,12 +280,95 @@ const Tasks = () => {
     
     if (!task) return;
 
+    // Check if dropped on another task (reordering within same column)
+    if (over.data.current?.type === 'task' && over.id !== taskId) {
+      const overTask = tasks.find(t => t.id === over.id);
+      if (!overTask || overTask.status !== task.status) return;
+      
+      // Reordering within the same column
+      const columnTasks = getTasksByStatus(task.status);
+      const oldIndex = columnTasks.findIndex(t => t.id === taskId);
+      const newIndex = columnTasks.findIndex(t => t.id === over.id);
+      
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
+      
+      // Reorder tasks using arrayMove
+      const reorderedTasks = arrayMove(columnTasks, oldIndex, newIndex);
+      
+      // Update orders for all tasks in the column
+      const taskOrders = reorderedTasks.map((t, index) => ({
+        taskId: t.id,
+        order: index,
+      }));
+      
+      try {
+        // Optimistically update UI
+        setTasks(prevTasks =>
+          prevTasks.map(t => {
+            const orderUpdate = taskOrders.find(to => to.taskId === t.id);
+            if (orderUpdate) {
+              return { ...t, order: orderUpdate.order };
+            }
+            return t;
+          })
+        );
+        
+        // Update in database
+        await reorderTasksInStatus(task.status, taskOrders);
+      } catch (error: any) {
+        // Revert on error
+        loadTasks();
+        toast({
+          title: 'Error',
+          description: error.message || 'Failed to reorder tasks',
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
+
     // Check if dropped on a column
     if (over.data.current?.type === 'column') {
       const newStatus = over.data.current.status as TaskStatus;
       
-      // Don't update if status hasn't changed
-      if (task.status === newStatus) return;
+      // If status hasn't changed, this is a reorder within the same column (dropped on column area)
+      if (task.status === newStatus) {
+        // Handle reordering within the same column - move to end
+        const columnTasks = getTasksByStatus(newStatus);
+        const oldIndex = columnTasks.findIndex(t => t.id === taskId);
+        
+        if (oldIndex === -1) return;
+        
+        // Move to end
+        const reorderedTasks = arrayMove(columnTasks, oldIndex, columnTasks.length - 1);
+        
+        const taskOrders = reorderedTasks.map((t, index) => ({
+          taskId: t.id,
+          order: index,
+        }));
+        
+        try {
+          setTasks(prevTasks =>
+            prevTasks.map(t => {
+              const orderUpdate = taskOrders.find(to => to.taskId === t.id);
+              if (orderUpdate) {
+                return { ...t, order: orderUpdate.order };
+              }
+              return t;
+            })
+          );
+          
+          await reorderTasksInStatus(newStatus, taskOrders);
+        } catch (error: any) {
+          loadTasks();
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to reorder tasks',
+            variant: 'destructive',
+          });
+        }
+        return;
+      }
 
       // Check permissions
       const isAssigned = user && task.assignedMembers.includes(user.id);
@@ -311,10 +410,14 @@ const Tasks = () => {
       }
 
       try {
+        // Get tasks in the new status column to determine the new order
+        const newStatusTasks = getTasksByStatus(newStatus);
+        const newOrder = newStatusTasks.length; // Place at the end
+        
         // Optimistically update UI
         setTasks(prevTasks =>
           prevTasks.map(t =>
-            t.id === taskId ? { ...t, status: newStatus } : t
+            t.id === taskId ? { ...t, status: newStatus, order: newOrder } : t
           )
         );
 
@@ -323,6 +426,9 @@ const Tasks = () => {
           changedBy: user?.id,
           changedByName: user?.name,
         });
+        
+        // Update the order in the database
+        await updateTaskOrder(taskId, newOrder);
 
         // Show appropriate message for collaborative tasks
         if (task.collaborative && newStatus === 'Complete') {
@@ -646,6 +752,7 @@ const Tasks = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {columns.map((column) => {
             const columnTasks = getTasksByStatus(column.status);
+            const taskIds = columnTasks.map(task => task.id);
             return (
               <DroppableColumn
                 key={column.status}
@@ -655,6 +762,7 @@ const Tasks = () => {
                 color={column.color}
                 taskCount={columnTasks.length}
                 isOver={draggedOverColumn === column.status}
+                taskIds={taskIds}
               >
                 {columnTasks.map((task) => (
                   <DraggableTaskCard
