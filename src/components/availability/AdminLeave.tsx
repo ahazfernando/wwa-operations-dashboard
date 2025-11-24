@@ -268,7 +268,6 @@ const AdminLeave: React.FC = () => {
         }
     }
 
-    // Format date range for table column
     const formatLeaveDateRange = (req: LeaveRequest) => {
         const from = req.fromDate.toDate()
         const to = req.toDate.toDate()
