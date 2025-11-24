@@ -69,7 +69,7 @@ const timeSlots = Array.from({ length: 20 }, (_, i) => {
 });
 
 const formatTimeBlock = (indices: number[]): string => {
-    if (indices.length === 0) return "";
+    if (indices.length === 0) return "N/A";
     const start = (indices[0] + 4) % 24;
     const end = (indices[indices.length - 1] + 5) % 24;
     const fmt = (h: number): string => {
@@ -96,6 +96,8 @@ interface RawSlot {
     weekStart: string;
 }
 
+type IntentType = "requesting" | "remove" | "pending" | "approved";
+
 interface Block {
     blockId: string;
     uid: string;
@@ -104,7 +106,7 @@ interface Block {
     dateFormatted: string;
     timeIndices: number[];
     timeLabel: string;
-    intent: "requesting" | "remove" | "pending" | "approved";
+    intent: IntentType;
     docId: string;
 }
 
@@ -112,7 +114,7 @@ interface ModalSlot {
     id: string;
     timeIndex: number;
     timeLabel: string;
-    intent: "requesting" | "remove" | "pending" | "approved";
+    intent: IntentType;
     docId: string;
     status: RawSlot["status"];
 }
@@ -168,10 +170,7 @@ export default function AvailabilityRequests() {
                 const data = docSnap.data();
                 const uid = data.uid as string | undefined;
                 const weekStart = data.weekStart as string | undefined;
-                const slotsData = data.slots as Record<
-                    string,
-                    { timeIndex: number; status: string }[]
-                > | undefined;
+                const slotsData = data.slots as Record<string, { timeIndex: number; status: string }[]> | undefined;
 
                 if (!uid || !weekStart || !slotsData) return;
 
@@ -199,17 +198,48 @@ export default function AvailabilityRequests() {
         return unsub;
     }, [users]);
 
+    // Helper to safely map status → intent
+    const getIntent = (status: RawSlot["status"]): IntentType => {
+        switch (status) {
+            case "request-add":
+                return "requesting";
+            case "request-remove":
+                return "remove";
+            case "pending":
+                return "pending";
+            case "approved":
+                return "approved";
+            default:
+                return "pending"; // fallback
+        }
+    };
+
+    const getIntentLabel = (intent: IntentType): string => {
+        return intent.charAt(0).toUpperCase() + intent.slice(1);
+    };
+
+    const getIntentColor = (intent: IntentType): string => {
+        switch (intent) {
+            case "requesting":
+                return "bg-yellow-100 text-yellow-800";
+            case "remove":
+                return "bg-red-100 text-red-800";
+            case "pending":
+                return "bg-blue-100 text-blue-800";
+            case "approved":
+                return "bg-green-100 text-green-800";
+            default:
+                return "bg-gray-100 text-gray-800";
+        }
+    };
+
     const blocks = useMemo(() => {
         let filtered = allSlots.filter((s) => s.weekStart === weekKey);
 
         if (filterUser !== "all") filtered = filtered.filter((s) => s.uid === filterUser);
         if (filterIntent !== "all") {
-            filtered = filtered.filter((s) => {
-                if (filterIntent === "requesting") return s.status === "request-add";
-                if (filterIntent === "remove") return s.status === "request-remove";
-                if (filterIntent === "approved") return s.status === "approved";
-                return s.status === "pending";
-            });
+            const targetIntent = filterIntent as IntentType;
+            filtered = filtered.filter((s) => getIntent(s.status) === targetIntent);
         }
         if (selectedDate) {
             const d = format(selectedDate, "yyyy-MM-dd");
@@ -218,12 +248,7 @@ export default function AvailabilityRequests() {
 
         const map = new Map<string, RawSlot[]>();
         filtered.forEach((s) => {
-            const intent =
-                s.status === "request-add"
-                    ? "requesting"
-                    : s.status === "request-remove"
-                        ? "remove"
-                        : (s.status as "pending" | "approved");
+            const intent = getIntent(s.status);
             const key = `${s.uid}-${s.date}-${intent}`;
             if (!map.has(key)) map.set(key, []);
             map.get(key)!.push(s);
@@ -246,12 +271,7 @@ export default function AvailabilityRequests() {
                         dateFormatted: format(parseISO(items[0].date), "EEE, MMM dd"),
                         timeIndices: current,
                         timeLabel: formatTimeBlock(current),
-                        intent:
-                            items[0].status === "request-add"
-                                ? "requesting"
-                                : items[0].status === "request-remove"
-                                    ? "remove"
-                                    : items[0].status,
+                        intent: getIntent(items[0].status),
                         docId: items[0].docId,
                     });
                     current = [sorted[i].timeIndex];
@@ -265,12 +285,7 @@ export default function AvailabilityRequests() {
                 dateFormatted: format(parseISO(items[0].date), "EEE, MMM dd"),
                 timeIndices: current,
                 timeLabel: formatTimeBlock(current),
-                intent:
-                    items[0].status === "request-add"
-                        ? "requesting"
-                        : items[0].status === "request-remove"
-                            ? "remove"
-                            : items[0].status,
+                intent: getIntent(items[0].status),
                 docId: items[0].docId,
             });
         });
@@ -291,12 +306,7 @@ export default function AvailabilityRequests() {
 
         const map = new Map<string, GroupedModalSlot>();
         filtered.forEach((s) => {
-            const intent =
-                s.status === "request-add"
-                    ? "requesting"
-                    : s.status === "request-remove"
-                        ? "remove"
-                        : (s.status as "pending" | "approved");
+            const intent = getIntent(s.status);
 
             if (!map.has(s.date)) {
                 map.set(s.date, {
@@ -355,10 +365,11 @@ export default function AvailabilityRequests() {
                     const idx = daySlots.findIndex((s) => s.timeIndex === slot.timeIndex);
                     if (idx !== -1) {
                         daySlots[idx] = { timeIndex: slot.timeIndex, status: "approved" };
+                    } else {
+                        daySlots.push({ timeIndex: slot.timeIndex, status: "approved" });
                     }
                     currentSlots[slot.date] = daySlots;
                 });
-                await updateDoc(docRef, { slots: currentSlots });
             } else if (bulkAction === "rejected") {
                 slots.forEach((slot) => {
                     if (currentSlots[slot.date]) {
@@ -368,7 +379,6 @@ export default function AvailabilityRequests() {
                         if (currentSlots[slot.date].length === 0) delete currentSlots[slot.date];
                     }
                 });
-                await updateDoc(docRef, { slots: currentSlots });
             } else if (bulkAction === "pending") {
                 slots.forEach((slot) => {
                     const daySlots = currentSlots[slot.date] || [];
@@ -378,8 +388,9 @@ export default function AvailabilityRequests() {
                     }
                     currentSlots[slot.date] = daySlots;
                 });
-                await updateDoc(docRef, { slots: currentSlots });
             }
+
+            await updateDoc(docRef, { slots: currentSlots });
         }
 
         toast({
@@ -417,10 +428,7 @@ export default function AvailabilityRequests() {
             return next;
         });
 
-        toast({
-            title: "Deleted",
-            description: "Slot removed successfully",
-        });
+        toast({ title: "Deleted", description: "Slot removed successfully" });
     };
 
     return (
@@ -542,15 +550,8 @@ export default function AvailabilityRequests() {
                                                     <Badge variant="secondary">{block.timeLabel}</Badge>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Badge
-                                                        className={cn(
-                                                            block.intent === "requesting" && "bg-yellow-100 hover:bg-yellow-100 text-yellow-800",
-                                                            block.intent === "remove" && "bg-red-100 hover:bg-red-100 text-red-800",
-                                                            block.intent === "pending" && "bg-blue-100 hover:bg-blue-100 text-blue-800",
-                                                            block.intent === "approved" && "bg-green-100 hover:bg-green-100 text-green-800"
-                                                        )}
-                                                    >
-                                                        {block.intent.charAt(0).toUpperCase() + block.intent.slice(1)}
+                                                    <Badge className={cn("font-medium", getIntentColor(block.intent))}>
+                                                        {getIntentLabel(block.intent)}
                                                     </Badge>
                                                 </TableCell>
                                             </TableRow>
@@ -586,7 +587,7 @@ export default function AvailabilityRequests() {
                                         : "Select All"}
                                 </Button>
 
-                                <Select value={bulkAction} onValueChange={(v) => setBulkAction(v as "approved" | "rejected" | "pending")}>
+                                <Select value={bulkAction} onValueChange={(v) => setBulkAction(v as any)}>
                                     <SelectTrigger className="w-48">
                                         <SelectValue />
                                     </SelectTrigger>
@@ -651,15 +652,8 @@ export default function AvailabilityRequests() {
                                                     </TableCell>
 
                                                     <TableCell>
-                                                        <Badge
-                                                            className={cn(
-                                                                slot.intent === "requesting" && "bg-yellow-100 hover:bg-yellow-100 text-yellow-800",
-                                                                slot.intent === "remove" && "bg-red-100 hover:bg-red-100 text-red-800",
-                                                                slot.intent === "pending" && "bg-blue-100 hover:bg-blue-100 text-blue-800",
-                                                                slot.intent === "approved" && "bg-green-100 hover:bg-green-100 text-green-800"
-                                                            )}
-                                                        >
-                                                            {slot.intent.charAt(0).toUpperCase() + slot.intent.slice(1)}
+                                                        <Badge className={cn("font-medium", getIntentColor(slot.intent))}>
+                                                            {getIntentLabel(slot.intent)}
                                                         </Badge>
                                                     </TableCell>
 

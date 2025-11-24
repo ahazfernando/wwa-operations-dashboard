@@ -1,11 +1,25 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { format, startOfWeek, addDays, subWeeks, addWeeks, isBefore, startOfDay } from 'date-fns'
-import { ChevronLeft, ChevronRight, Edit3 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Edit3, Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { onAuthStateChanged, User } from 'firebase/auth'
 import { collection, addDoc, updateDoc, doc, query, where, onSnapshot, Timestamp } from 'firebase/firestore'
@@ -32,15 +46,25 @@ interface AvailabilityTableProps {
     timeSlots: string[]
 }
 
+const threeDCell = cn(
+    'h-12 rounded-2xl border-2 border-transparent p-2 text-center',
+    'cursor-pointer select-none',
+    'shadow-md',
+    'transition-all duration-200',
+    'hover:shadow-xl',
+    'active:scale-95 active:shadow-inner',
+    'relative'
+)
+
 const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
     const { toast } = useToast()
     const [user, setUser] = useState<User | null>(null)
     const [currentWeek, setCurrentWeek] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
-    const [selected, setSelected] = useState<Set<string>>(new Set()) // Visible slots in main table
+    const [selected, setSelected] = useState<Set<string>>(new Set())
     const [weekData, setWeekData] = useState<WeekData | null>(null)
     const [isSubmitted, setIsSubmitted] = useState(false)
     const [editOpen, setEditOpen] = useState(false)
-    const [editSelection, setEditSelection] = useState<Set<string>>(new Set()) // Temp selection during edit
+    const [editSelection, setEditSelection] = useState<Set<string>>(new Set())
 
     const unsubRef = useRef<(() => void) | null>(null)
     const draftLoaded = useRef(false)
@@ -118,7 +142,6 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
             setIsSubmitted(true)
             if (draftKey) localStorage.removeItem(draftKey)
 
-            // Rebuild visible slots
             const visible = new Set<string>()
             Object.entries(data.slots || {}).forEach(([date, daySlots]) => {
                 daySlots.forEach((slot) => {
@@ -237,10 +260,8 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                     if (existing?.status === 'approved' || existing?.status === 'pending') {
                         daySlots.push({ timeIndex: tIdx, status: 'request-remove' })
                     }
-                } else if (wasSelected && nowSelected) {
-                    if (existing) {
-                        daySlots.push(existing)
-                    }
+                } else if (wasSelected && nowSelected && existing) {
+                    daySlots.push(existing)
                 }
             })
 
@@ -253,9 +274,7 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                 submittedAt: Timestamp.now(),
             })
 
-            // Fixed: No more ESLint error — clean & safe
             setSelected(new Set(editSelection))
-
             setEditOpen(false)
             toast({ title: 'Changes requested successfully!' })
         } catch {
@@ -263,11 +282,10 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
         }
     }
 
-    // Badge display — no icons, only text
     const getDisplay = (date: string, tIdx: number) => {
         if (!weekData) {
             return selected.has(`${date}-${tIdx}`)
-                ? { text: 'Draft', className: 'bg-blue-100 text-blue-800 border-blue-300' }
+                ? { text: 'Select', className: 'bg-blue-100 hover:bg-blue-100 text-blue-800' }
                 : null
         }
 
@@ -275,10 +293,10 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
         if (!slot) return null
 
         const map: Record<SlotStatus, { text: string; className: string }> = {
-            approved: { text: 'Approved', className: 'bg-green-100 hover:bg-green-100 text-green-800 border-green-300' },
-            pending: { text: 'Pending', className: 'bg-blue-100 hover:bg-blue-100 text-blue-800 border-blue-300' },
-            'request-add': { text: 'Requesting', className: 'bg-yellow-100 hover:bg-yellow-100 text-yellow-800 border-yellow-300' },
-            'request-remove': { text: 'Remove', className: 'bg-red-100 text-red-800 hover:bg-red-100 border-red-300 line-through' },
+            approved: { text: 'Approved', className: 'bg-green-100 text-green-800' },
+            pending: { text: 'Pending', className: 'bg-blue-100 text-blue-800' },
+            'request-add': { text: 'Requesting', className: 'bg-yellow-100 text-yellow-800' },
+            'request-remove': { text: 'Remove', className: 'bg-red-100 text-red-800 line-through' },
         }
 
         return map[slot.status]
@@ -287,36 +305,56 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
     return (
         <>
             <Card className="shadow-xl border-0 rounded-xl max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-end gap-3 p-5 border-b">
-                    {isSubmitted && (
-                        <Button variant="outline" onClick={openEdit}>
-                            <Edit3 className="h-4 w-4 mr-2" />
-                            Edit Availability
+                <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-5 p-10">
+                    <div className="flex items-center gap-4">
+                        <Sparkles className="h-8 w-8" />
+                        <h1 className="text-2xl font-bold">Weekly Availability</h1>
+                    </div>
+
+                    <div className="flex gap-4">
+                        {isSubmitted && (
+                            <Button variant="outline" onClick={openEdit} className="border-2">
+                                <Edit3 className="h-4 w-4 mr-2" /> Edit
+                            </Button>
+                        )}
+                        <Button
+                            onClick={submitAvailability}
+                            disabled={isSubmitted || selected.size === 0}
+                            className={cn(
+                                'bg-blue-500 hover:bg-blue-600',
+                                (isSubmitted || selected.size === 0) && 'opacity-60 cursor-not-allowed'
+                            )}
+                        >
+                            {isSubmitted ? 'Submitted' : 'Submit Availability'}
                         </Button>
-                    )}
-                    <Button onClick={submitAvailability} disabled={isSubmitted || selected.size === 0}>
-                        {isSubmitted ? 'Submitted' : 'Submit Availability'}
-                    </Button>
+                    </div>
                 </div>
 
                 <CardContent className="p-0">
-                    <div className="flex justify-between items-center px-6 py-4 border-b">
-                        <Button variant="outline" size="sm" onClick={prevWeek}>
-                            <ChevronLeft className="h-4 w-4 mr-2" /> Previous
+                    <div className="flex items-center justify-center gap-6 mb-8">
+                        <Button variant="ghost" size="icon" onClick={prevWeek}>
+                            <ChevronLeft className="h-6 w-6" />
                         </Button>
-                        <div className="font-bold text-lg">Week of {format(currentWeek, 'MMM dd, yyyy')}</div>
-                        <Button variant="outline" size="sm" onClick={nextWeek}>
-                            Next <ChevronRight className="h-4 w-4 ml-2" />
+                        <div className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+                            Week of {format(currentWeek, 'MMMM d, yyyy')}
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={nextWeek}>
+                            <ChevronRight className="h-6 w-6" />
                         </Button>
                     </div>
 
-                    <div className="overflow-auto">
-                        <Table>
+                    <div className="overflow-x-auto">
+                        <Table className="w-full">
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead className="w-30 text-center sticky left-0 z-10 bg-background">Time</TableHead>
+                                    <TableHead className="w-32 text-center sticky left-0 z-20 bg-background border-r">
+                                        Time
+                                    </TableHead>
                                     {dayNames.map((day, i) => (
-                                        <TableHead key={day} className="text-center">
+                                        <TableHead
+                                            key={day}
+                                            className="min-w-36 text-center border-x" // Equal width for all days
+                                        >
                                             <div className="font-bold">{day}</div>
                                             <div className="text-xs text-muted-foreground">
                                                 {format(addDays(currentWeek, i), 'MM/dd')}
@@ -328,9 +366,9 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                             <TableBody>
                                 {timeSlots.map((slot, tIdx) => (
                                     <TableRow key={slot}>
-                                        <TableHead className="text-center font-medium sticky left-0 z-10 bg-background">
+                                        <TableCell className="text-center font-medium sticky left-0 z-10 bg-background border-r w-32">
                                             {slot}
-                                        </TableHead>
+                                        </TableCell>
                                         {dayNames.map((_, dIdx) => {
                                             const date = format(addDays(currentWeek, dIdx), 'yyyy-MM-dd')
                                             const key = `${date}-${tIdx}`
@@ -341,14 +379,18 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                                 <TableCell
                                                     key={key}
                                                     className={cn(
-                                                        'h-12 border text-center cursor-pointer transition-all',
+                                                        'w-20 h-10 border-x rounded-2xl text-center relative cursor-pointer transition-all',
                                                         isPast && 'opacity-40 cursor-not-allowed',
-                                                        display?.className || (selected.has(key) && !weekData ? 'bg-blue-50 border-blue-300' : '')
+                                                        !isPast && !isSubmitted && 'hover:bg-muted/50',
+                                                        display?.className
                                                     )}
                                                     onClick={() => !isPast && !isSubmitted && toggleSlot(key)}
                                                 >
                                                     {display && (
-                                                        <Badge variant="secondary" className={cn('text-xs', display.className)}>
+                                                        <Badge
+                                                            variant="secondary"
+                                                            className="text-xs font-medium pointer-events-none"
+                                                        >
                                                             {display.text}
                                                         </Badge>
                                                     )}
@@ -365,7 +407,7 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
 
             {/* Edit Dialog */}
             <Dialog open={editOpen} onOpenChange={setEditOpen}>
-                <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
+                <DialogContent className="max-w-7xl max-h-[90vh] flex flex-col">
                     <DialogHeader>
                         <DialogTitle>Edit Availability</DialogTitle>
                         <DialogDescription asChild>
@@ -373,13 +415,13 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                 <p>Click any slot to add or remove from your availability.</p>
                                 <div className="flex flex-wrap gap-6 font-medium">
                                     <span className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded bg-green-500" /> Already Selected
+                                        <div className="w-4 h-4 rounded bg-green-500" /> Selected
                                     </span>
                                     <span className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded bg-yellow-500" /> Requesting
+                                        <div className="w-4 h-4 rounded bg-yellow-500" /> Requesting Add
                                     </span>
                                     <span className="flex items-center gap-2">
-                                        <div className="w-4 h-4 rounded bg-red-500" /> Remove
+                                        <div className="w-4 h-4 rounded bg-red-500" /> Requesting Remove
                                     </span>
                                 </div>
                             </div>
@@ -390,9 +432,9 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead className="sticky left-0 bg-background z-10">Time</TableHead>
+                                    <TableHead className="sticky left-0 bg-background z-10 w-32 border-r">Time</TableHead>
                                     {dayNames.map((d, i) => (
-                                        <TableHead key={d} className="text-center">
+                                        <TableHead key={d} className="min-w-36 text-center border-x">
                                             <div>{d}</div>
                                             <div className="text-xs">{format(addDays(currentWeek, i), 'MM/dd')}</div>
                                         </TableHead>
@@ -402,9 +444,9 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                             <TableBody>
                                 {timeSlots.map((slot, tIdx) => (
                                     <TableRow key={slot}>
-                                        <TableHead className="text-center font-medium sticky left-0 bg-background z-10">
+                                        <TableCell className="text-center font-medium sticky left-0 bg-background z-10 w-32 border-r">
                                             {slot}
-                                        </TableHead>
+                                        </TableCell>
                                         {dayNames.map((_, dIdx) => {
                                             const date = format(addDays(currentWeek, dIdx), 'yyyy-MM-dd')
                                             const key = `${date}-${tIdx}`
@@ -412,40 +454,46 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                             const wasSelected = selected.has(key)
                                             const nowSelected = editSelection.has(key)
 
-                                            let cellClass = 'h-12 border text-center relative transition-all'
+                                            let bgClass = 'bg-muted/30'
                                             let badgeText: string | null = null
-                                            let badgeColor = ''
+                                            let badgeVariant: 'default' | 'destructive' = 'default'
 
                                             if (isPast) {
-                                                cellClass += ' opacity-40 cursor-not-allowed'
+                                                bgClass = 'opacity-40 cursor-not-allowed'
                                             } else if (!wasSelected && nowSelected) {
-                                                cellClass += ' bg-yellow-100 border-2 border-yellow-600 cursor-pointer'
+                                                bgClass = 'bg-yellow-100 hover:bg-yellow-200'
                                                 badgeText = 'Requesting'
-                                                badgeColor = 'bg-yellow-600 text-white'
                                             } else if (wasSelected && !nowSelected) {
-                                                cellClass += ' bg-red-100 border-2 border-red-600 line-through cursor-pointer'
+                                                bgClass = 'bg-red-100 hover:bg-red-200 line-through'
                                                 badgeText = 'Remove'
-                                                badgeColor = 'bg-red-600 text-white'
+                                                badgeVariant = 'destructive'
                                             } else if (wasSelected && nowSelected) {
-                                                cellClass += ' bg-green-100 border-2 border-green-600 cursor-pointer'
+                                                bgClass = 'bg-green-100 hover:bg-green-200'
                                                 badgeText = 'Selected'
-                                                badgeColor = 'bg-green-600 text-white'
-                                            } else {
-                                                cellClass += ' opacity-30 cursor-default'
                                             }
 
                                             return (
                                                 <TableCell
                                                     key={key}
-                                                    className={cn(cellClass)}
+                                                    className={cn(
+                                                        threeDCell,
+                                                        'w-20 h-10 border-x',
+                                                        !isPast && 'cursor-pointer',
+                                                        isPast && 'cursor-not-allowed',
+                                                        bgClass
+                                                    )}
                                                     onClick={() => !isPast && toggleInEdit(key)}
                                                 >
                                                     {badgeText && (
-                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                                                            <Badge className={cn('text-xs', badgeColor)}>
-                                                                {badgeText}
-                                                            </Badge>
-                                                        </div>
+                                                        <Badge
+                                                            variant={badgeVariant}
+                                                            className={cn(
+                                                                'absolute inset-0 m-auto w-fit h-fit pointer-events-none',
+                                                                badgeVariant === 'destructive' && 'text-white bg-red-600'
+                                                            )}
+                                                        >
+                                                            {badgeText}
+                                                        </Badge>
                                                     )}
                                                 </TableCell>
                                             )
@@ -460,9 +508,7 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                         <Button variant="outline" onClick={() => setEditOpen(false)}>
                             Cancel
                         </Button>
-                        <Button onClick={confirmEdit}>
-                            Save Changes
-                        </Button>
+                        <Button onClick={confirmEdit}>Save Changes</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
