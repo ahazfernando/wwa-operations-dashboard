@@ -71,13 +71,11 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
     const weekKey = format(currentWeek, 'yyyy-MM-dd')
     const draftKey = user ? `draft-availability-${user.uid}-${weekKey}` : null
 
-    // Save draft
     const saveDraft = useCallback(() => {
         if (!draftKey) return
         localStorage.setItem(draftKey, JSON.stringify({ selected: Array.from(selected) }))
     }, [draftKey, selected])
 
-    // Load draft
     useEffect(() => {
         if (!user || !draftKey || draftLoaded.current) return
         const saved = localStorage.getItem(draftKey)
@@ -98,13 +96,11 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
         draftLoaded.current = false
     }, [weekKey, user])
 
-    // Auth listener
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, setUser)
         return () => unsubscribe()
     }, [])
 
-    // Firestore real-time listener
     useEffect(() => {
         if (!user) {
             setWeekData(null)
@@ -302,6 +298,11 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
         return map[slot.status]
     }
 
+    const formatSlotLabel = (index: number) => {
+        const n = index + 1
+        return n < 10 ? `Slot 0${n}` : `Slot ${n}`
+    }
+
     return (
         <>
             <Card className="shadow-xl border-0 rounded-xl max-h-[90vh] overflow-y-auto">
@@ -374,6 +375,14 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                             const key = `${date}-${tIdx}`
                                             const isPast = isPastDate(date)
                                             const display = getDisplay(date, tIdx)
+                                            const showSelected = !weekData && selected.has(key)
+
+                                            const baseClasses = cn(
+                                                threeDCell,
+                                                'mx-3 my-2',
+                                                isPast && 'opacity-40 cursor-not-allowed',
+                                                !isPast && !isSubmitted && 'hover:brightness-105'
+                                            )
 
                                             return (
                                                 <TableCell
@@ -405,7 +414,6 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                 </CardContent>
             </Card>
 
-            {/* Edit Dialog */}
             <Dialog open={editOpen} onOpenChange={setEditOpen}>
                 <DialogContent className="max-w-7xl max-h-[90vh] flex flex-col">
                     <DialogHeader>
