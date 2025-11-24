@@ -47,13 +47,14 @@ interface AvailabilityTableProps {
 }
 
 const threeDCell = cn(
-    'h-12 rounded-2xl border-2 border-transparent p-2 text-center',
-    'cursor-pointer select-none',
-    'shadow-md',
-    'transition-all duration-200',
-    'hover:shadow-xl',
-    'active:scale-95 active:shadow-inner',
-    'relative'
+    'relative h-full rounded-lg overflow-hidden bg-white/30 backdrop-blur-sm border-4 border-white/40',
+    'rounded-lg overflow-hidden',
+    'cursor-pointer',
+    'transition-transform duration-200',
+    'hover:translate-y-[-1px] hover:shadow-2xl',
+    'active:translate-y-0 active:shadow-inner',
+    'bg-white/30 backdrop-blur-sm',
+    'border-4 border-white/40 aligh-center'
 )
 
 const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
@@ -71,13 +72,11 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
     const weekKey = format(currentWeek, 'yyyy-MM-dd')
     const draftKey = user ? `draft-availability-${user.uid}-${weekKey}` : null
 
-    // Save draft
     const saveDraft = useCallback(() => {
         if (!draftKey) return
         localStorage.setItem(draftKey, JSON.stringify({ selected: Array.from(selected) }))
     }, [draftKey, selected])
 
-    // Load draft
     useEffect(() => {
         if (!user || !draftKey || draftLoaded.current) return
         const saved = localStorage.getItem(draftKey)
@@ -98,13 +97,11 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
         draftLoaded.current = false
     }, [weekKey, user])
 
-    // Auth listener
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, setUser)
         return () => unsubscribe()
     }, [])
 
-    // Firestore real-time listener
     useEffect(() => {
         if (!user) {
             setWeekData(null)
@@ -285,7 +282,7 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
     const getDisplay = (date: string, tIdx: number) => {
         if (!weekData) {
             return selected.has(`${date}-${tIdx}`)
-                ? { text: 'Select', className: 'bg-blue-100 hover:bg-blue-100 text-blue-800' }
+                ? { text: 'Selected', className: 'bg-blue-100 text-blue-800' }
                 : null
         }
 
@@ -300,6 +297,11 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
         }
 
         return map[slot.status]
+    }
+
+    const formatSlotLabel = (index: number) => {
+        const n = index + 1
+        return n < 10 ? `Slot 0${n}` : `Slot ${n}`
     }
 
     return (
@@ -347,13 +349,13 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                         <Table className="w-full">
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead className="w-32 text-center sticky left-0 z-20 bg-background border-r">
+                                    <TableHead className="w-36 text-center sticky left-0 z-20 bg-background border-r">
                                         Time
                                     </TableHead>
                                     {dayNames.map((day, i) => (
                                         <TableHead
                                             key={day}
-                                            className="min-w-36 text-center border-x" // Equal width for all days
+                                            className="min-w-[160px] text-center border-x"
                                         >
                                             <div className="font-bold">{day}</div>
                                             <div className="text-xs text-muted-foreground">
@@ -366,7 +368,7 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                             <TableBody>
                                 {timeSlots.map((slot, tIdx) => (
                                     <TableRow key={slot}>
-                                        <TableCell className="text-center font-medium sticky left-0 z-10 bg-background border-r w-32">
+                                        <TableCell className="text-center font-medium sticky left-0 z-10 bg-background border-r w-36">
                                             {slot}
                                         </TableCell>
                                         {dayNames.map((_, dIdx) => {
@@ -374,26 +376,51 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                             const key = `${date}-${tIdx}`
                                             const isPast = isPastDate(date)
                                             const display = getDisplay(date, tIdx)
+                                            const showSelected = !weekData && selected.has(key)
+
+                                            const baseClasses = cn(
+                                                threeDCell,
+                                                'mx-3 my-2',
+                                                isPast && 'opacity-40 cursor-not-allowed',
+                                                !isPast && !isSubmitted && 'hover:brightness-105'
+                                            )
 
                                             return (
                                                 <TableCell
                                                     key={key}
-                                                    className={cn(
-                                                        'w-20 h-10 border-x rounded-2xl text-center relative cursor-pointer transition-all',
-                                                        isPast && 'opacity-40 cursor-not-allowed',
-                                                        !isPast && !isSubmitted && 'hover:bg-muted/50',
-                                                        display?.className
-                                                    )}
+                                                    className="w-40 h-20 p-3 align-middle"
                                                     onClick={() => !isPast && !isSubmitted && toggleSlot(key)}
                                                 >
-                                                    {display && (
-                                                        <Badge
-                                                            variant="secondary"
-                                                            className="text-xs font-medium pointer-events-none"
-                                                        >
-                                                            {display.text}
-                                                        </Badge>
-                                                    )}
+                                                    <div className={baseClasses}>
+                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+                                                            {display && (
+                                                                <div
+                                                                    className={cn(
+                                                                        'px-4 py-1 rounded-full text-white font-medium text-xs shadow-xl',
+                                                                        display.text === 'Approved' && 'bg-green-500',
+                                                                        display.text === 'Selected' && 'bg-blue-500',
+                                                                        (display.text === 'Pending' || display.text === 'Requesting') && 'bg-yellow-500',
+                                                                        display.text === 'Remove' && 'bg-red-500 line-through'
+                                                                    )}
+                                                                >
+                                                                    {display.text}
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex items-center justify-center h-full w-full">
+                                                            <span className={cn(
+                                                                'text-sm font-medium text-gray-800 dark:text-gray-100 select-none',
+                                                                showSelected && 'text-blue-800'
+                                                            )}>
+                                                                {formatSlotLabel(tIdx)}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className={cn(
+                                                            'absolute inset-0 rounded-lg pointer-events-none ring-0 transition-all'
+                                                        )} />
+                                                    </div>
                                                 </TableCell>
                                             )
                                         })}
@@ -405,7 +432,6 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                 </CardContent>
             </Card>
 
-            {/* Edit Dialog */}
             <Dialog open={editOpen} onOpenChange={setEditOpen}>
                 <DialogContent className="max-w-7xl max-h-[90vh] flex flex-col">
                     <DialogHeader>
@@ -432,9 +458,9 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead className="sticky left-0 bg-background z-10 w-32 border-r">Time</TableHead>
+                                    <TableHead className="sticky left-0 bg-background z-10 w-36 border-r">Time</TableHead>
                                     {dayNames.map((d, i) => (
-                                        <TableHead key={d} className="min-w-36 text-center border-x">
+                                        <TableHead key={d} className="min-w-[160px] text-center border-x">
                                             <div>{d}</div>
                                             <div className="text-xs">{format(addDays(currentWeek, i), 'MM/dd')}</div>
                                         </TableHead>
@@ -444,7 +470,7 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                             <TableBody>
                                 {timeSlots.map((slot, tIdx) => (
                                     <TableRow key={slot}>
-                                        <TableCell className="text-center font-medium sticky left-0 bg-background z-10 w-32 border-r">
+                                        <TableCell className="text-center font-medium sticky left-0 bg-background z-10 w-36 border-r">
                                             {slot}
                                         </TableCell>
                                         {dayNames.map((_, dIdx) => {
@@ -454,21 +480,21 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                             const wasSelected = selected.has(key)
                                             const nowSelected = editSelection.has(key)
 
-                                            let bgClass = 'bg-muted/30'
+                                            let bgClass = 'bg-white/20'
                                             let badgeText: string | null = null
                                             let badgeVariant: 'default' | 'destructive' = 'default'
 
                                             if (isPast) {
                                                 bgClass = 'opacity-40 cursor-not-allowed'
                                             } else if (!wasSelected && nowSelected) {
-                                                bgClass = 'bg-yellow-100 hover:bg-yellow-200'
+                                                bgClass = 'bg-yellow-100'
                                                 badgeText = 'Requesting'
                                             } else if (wasSelected && !nowSelected) {
-                                                bgClass = 'bg-red-100 hover:bg-red-200 line-through'
+                                                bgClass = 'bg-red-100 line-through'
                                                 badgeText = 'Remove'
                                                 badgeVariant = 'destructive'
                                             } else if (wasSelected && nowSelected) {
-                                                bgClass = 'bg-green-100 hover:bg-green-200'
+                                                bgClass = 'bg-green-100'
                                                 badgeText = 'Selected'
                                             }
 
@@ -476,25 +502,38 @@ const AvailabilityTable: React.FC<AvailabilityTableProps> = ({ timeSlots }) => {
                                                 <TableCell
                                                     key={key}
                                                     className={cn(
-                                                        threeDCell,
-                                                        'w-20 h-10 border-x',
+                                                        'p-3 w-40 h-20 border-x',
                                                         !isPast && 'cursor-pointer',
-                                                        isPast && 'cursor-not-allowed',
-                                                        bgClass
+                                                        isPast && 'cursor-not-allowed'
                                                     )}
                                                     onClick={() => !isPast && toggleInEdit(key)}
                                                 >
-                                                    {badgeText && (
-                                                        <Badge
-                                                            variant={badgeVariant}
-                                                            className={cn(
-                                                                'absolute inset-0 m-auto w-fit h-fit pointer-events-none',
-                                                                badgeVariant === 'destructive' && 'text-white bg-red-600'
+                                                    <div className={cn(
+                                                        'relative h-full rounded-lg overflow-hidden bg-white/30 backdrop-blur-sm border-4 border-white/40',
+                                                        bgClass,
+                                                        !isPast && 'hover:translate-y-[-3px] hover:shadow-lg'
+                                                    )}>
+                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                                                            {badgeText && (
+                                                                <Badge
+                                                                    className={cn(
+                                                                        'px-3 py-1 text-white font-semibold shadow-lg',
+                                                                        badgeText === 'Selected' && 'bg-green-500',
+                                                                        badgeText === 'Requesting' && 'bg-yellow-500',
+                                                                        badgeText === 'Remove' && 'bg-red-500 line-through'
+                                                                    )}
+                                                                >
+                                                                    {badgeText}
+                                                                </Badge>
                                                             )}
-                                                        >
-                                                            {badgeText}
-                                                        </Badge>
-                                                    )}
+                                                        </div>
+
+                                                        <div className="flex items-center justify-center h-full w-full">
+                                                            <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                                                                {formatSlotLabel(tIdx)}
+                                                            </span>
+                                                        </div>
+                                                    </div>
                                                 </TableCell>
                                             )
                                         })}
