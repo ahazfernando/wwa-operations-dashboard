@@ -9,7 +9,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Clock, Star, Users, Calendar, TrendingUp, CheckSquare, ArrowRight, AlertCircle, Bell, Plus, LogOut, LogIn } from 'lucide-react';
 import { getTasksByUser, getCompletedTasks, getCompletedTasksByUser } from '@/lib/tasks';
 import { Task } from '@/types/task';
-import { format, formatDistanceToNow } from 'date-fns';
+import { getRemindersByUser } from '@/lib/reminders';
+import { Reminder } from '@/types/reminder';
+import { format, formatDistanceToNow, isPast, isToday, isTomorrow } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ActiveUsersSection } from '@/components/ActiveUsersSection';
@@ -23,6 +25,8 @@ const Dashboard = () => {
   const router = useRouter();
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [loadingReminders, setLoadingReminders] = useState(true);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [loadingPhoto, setLoadingPhoto] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
@@ -41,6 +45,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (user) {
       loadAssignedTasks();
+      loadReminders();
       loadProfilePhoto();
       loadBusyStatus();
       loadRecentActivity();
@@ -118,6 +123,51 @@ const Dashboard = () => {
       console.error('Error loading assigned tasks:', error);
     } finally {
       setLoadingTasks(false);
+    }
+  };
+
+  const loadReminders = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingReminders(true);
+      const userReminders = await getRemindersByUser(user.id);
+      // Filter out completed reminders and get the most urgent one
+      const activeReminders = userReminders
+        .filter(reminder => !reminder.completed)
+        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+        .slice(0, 1); // Get only 1 reminder
+      setReminders(activeReminders);
+    } catch (error) {
+      console.error('Error loading reminders:', error);
+    } finally {
+      setLoadingReminders(false);
+    }
+  };
+
+  const getDueDateLabel = (date: Date) => {
+    if (isPast(date) && !isToday(date)) {
+      return 'Overdue';
+    }
+    if (isToday(date)) {
+      return 'Today';
+    }
+    if (isTomorrow(date)) {
+      return 'Tomorrow';
+    }
+    return format(date, 'MMM dd, yyyy');
+  };
+
+  const getPriorityColor = (priority: 'low' | 'medium' | 'high' | undefined) => {
+    switch (priority) {
+      case 'high':
+        return 'bg-red-500';
+      case 'medium':
+        return 'bg-yellow-500';
+      case 'low':
+        return 'bg-blue-500';
+      default:
+        return 'bg-gray-500';
     }
   };
 
@@ -352,55 +402,94 @@ const Dashboard = () => {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>Common tasks and shortcuts</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="text-sm space-y-1">
-              <p 
-                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
-                onClick={() => router.push('/clock')}
-              >
-                <Clock className="h-4 w-4" />
-                <span>Clock in/out for time tracking</span>
-              </p>
-              <p 
-                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
-                onClick={() => router.push('/ratings')}
-              >
-                <Star className="h-4 w-4" />
-                <span>Submit weekly ratings</span>
-              </p>
-              <p 
-                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
-                onClick={() => router.push('/leads')}
-              >
-                <Users className="h-4 w-4" />
-                <span>View and manage leads</span>
-              </p>
-              <p 
-                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
-                onClick={() => router.push('/tasks')}
-              >
-                <CheckSquare className="h-4 w-4" />
-                <span>View assigned tasks</span>
-              </p>
-              <p 
-                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
-                onClick={() => router.push('/reminders')}
-              >
-                <Bell className="h-4 w-4" />
-                <span>Manage reminders</span>
-              </p>
-              <p 
-                className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
-                onClick={() => router.push('/reminders')}
-              >
-                <Plus className="h-4 w-4" />
-                <span>New reminder</span>
-              </p>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>My Reminders</CardTitle>
+              <CardDescription>Upcoming and overdue reminders</CardDescription>
             </div>
+            <Button variant="outline" size="sm" onClick={() => router.push('/reminders')}>
+              View All
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {loadingReminders ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 border rounded-lg space-x-4">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-5 w-16" />
+                      <Skeleton className="h-4 w-20" />
+                    </div>
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                  <Skeleton className="h-4 w-4" />
+                </div>
+              </div>
+            ) : reminders.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Bell className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No reminders yet</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => router.push('/reminders')}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Reminder
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {reminders.map((reminder) => {
+                  const isOverdue = isPast(reminder.dueDate) && !isToday(reminder.dueDate);
+                  return (
+                    <div
+                      key={reminder.id}
+                      className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent cursor-pointer transition-colors ${
+                        isOverdue ? 'border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20' : ''
+                      }`}
+                      onClick={() => router.push('/reminders')}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge className={getPriorityColor(reminder.priority)}>
+                            {reminder.priority ? reminder.priority.charAt(0).toUpperCase() + reminder.priority.slice(1) : 'Medium'}
+                          </Badge>
+                          {isOverdue && (
+                            <Badge variant="destructive" className="text-xs">
+                              Overdue
+                            </Badge>
+                          )}
+                        </div>
+                        <h4 className="font-medium text-sm flex items-center gap-2">
+                          <Bell className={`h-3 w-3 ${isOverdue ? 'text-red-500' : ''}`} />
+                          {reminder.title}
+                        </h4>
+                        {reminder.description && (
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                            {reminder.description}
+                          </p>
+                        )}
+                        <p className={`text-xs mt-1 ${isOverdue ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>
+                          Due: {getDueDateLabel(reminder.dueDate)}
+                        </p>
+                        {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0
+                              ? `Assigned to: ${reminder.assignedMemberNames.slice(0, 2).join(', ')}${reminder.assignedMemberNames.length > 2 ? ` +${reminder.assignedMemberNames.length - 2}` : ''}`
+                              : `${reminder.assignedMembers.length} member${reminder.assignedMembers.length !== 1 ? 's' : ''}`}
+                          </p>
+                        )}
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground ml-4" />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 
