@@ -187,12 +187,12 @@ const WorkFromHome = () => {
     switch (location.status) {
       case 'approved':
         return (
-          <Alert className="bg-green-50 border-green-200">
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <AlertDescription className="text-green-800">
+          <Alert className="bg-green-500/20 backdrop-blur-md border-green-400/30 shadow-lg">
+            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+            <AlertDescription className="text-green-900 dark:text-green-100">
               <strong>Approved</strong> - You can clock in/out within 50m of this location.
               {location.approvedByName && (
-                <span className="block text-sm mt-1">
+                <span className="block text-sm mt-1 opacity-90">
                   Approved by {location.approvedByName}
                 </span>
               )}
@@ -242,8 +242,7 @@ const WorkFromHome = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="latitude">Latitude</Label>
+            <div className="flex justify-end">
               <Button
                 type="button"
                 variant="outline"
@@ -264,28 +263,32 @@ const WorkFromHome = () => {
                 )}
               </Button>
             </div>
-            <Input
-              id="latitude"
-              type="number"
-              step="any"
-              value={latitude}
-              onChange={(e) => setLatitude(e.target.value)}
-              placeholder="e.g., -37.8136"
-              disabled={location?.status === 'approved'}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="longitude">Longitude</Label>
-            <Input
-              id="longitude"
-              type="number"
-              step="any"
-              value={longitude}
-              onChange={(e) => setLongitude(e.target.value)}
-              placeholder="e.g., 144.9631"
-              disabled={location?.status === 'approved'}
-            />
+            <div className="flex gap-4">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="latitude">Latitude</Label>
+                <Input
+                  id="latitude"
+                  type="number"
+                  step="any"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  placeholder="e.g., -37.8136"
+                  disabled={location?.status === 'approved'}
+                />
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="longitude">Longitude</Label>
+                <Input
+                  id="longitude"
+                  type="number"
+                  step="any"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  placeholder="e.g., 144.9631"
+                  disabled={location?.status === 'approved'}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -301,16 +304,29 @@ const WorkFromHome = () => {
           </div>
 
           {latitude && longitude && (
-            <div className="p-4 bg-muted rounded-lg">
-              <p className="text-sm font-medium mb-2">Preview Location:</p>
-              <a
-                href={`https://www.google.com/maps?q=${latitude},${longitude}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline text-sm"
-              >
-                View on Google Maps →
-              </a>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Preview Location</Label>
+                <a
+                  href={`https://www.google.com/maps?q=${latitude},${longitude}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline text-sm"
+                >
+                  Open in Google Maps →
+                </a>
+              </div>
+              <div className="w-full h-[400px] rounded-lg overflow-hidden border">
+                <iframe
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  allowFullScreen
+                  referrerPolicy="no-referrer-when-downgrade"
+                  src={`https://maps.google.com/maps?q=${latitude},${longitude}&hl=en&z=15&output=embed`}
+                />
+              </div>
             </div>
           )}
 

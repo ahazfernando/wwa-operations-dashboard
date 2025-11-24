@@ -62,6 +62,7 @@ export interface Task {
   collaborative?: boolean; // Whether this is a collaborative task requiring all members to complete
   completedBy?: CompletedBy[]; // Array of users who have completed this collaborative task
   subtasks?: Subtask[]; // Array of subtasks
+  order?: number; // Order/position within the status column (for drag and drop reordering)
 }
 
 export interface FirestoreTask {
