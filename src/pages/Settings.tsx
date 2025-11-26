@@ -13,10 +13,14 @@ import { Check, X, Upload, FileText, Download, Search, History } from 'lucide-re
 import { useRouter } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, updateDoc, getDoc, collection, query, where, getDocs, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, Timestamp, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
 import { UserProfileViewDialog } from '@/components/UserProfileViewDialog';
-import { CheckCircle2, XCircle, MapPin } from 'lucide-react';
+import { CheckCircle2, XCircle, MapPin, Edit, Loader2, Clock, Trash2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 const Settings = () => {
   const { approveUser, rejectUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
@@ -33,13 +37,27 @@ const Settings = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedJobRole, setSelectedJobRole] = useState<string>('all');
   const [pendingLocations, setPendingLocations] = useState<any[]>([]);
+  const [allLocations, setAllLocations] = useState<any[]>([]);
   const [locationsLoading, setLocationsLoading] = useState(true);
+  const [allLocationsLoading, setAllLocationsLoading] = useState(true);
   const [processingLocation, setProcessingLocation] = useState<string | null>(null);
+  const [editingLocation, setEditingLocation] = useState<string | null>(null);
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [selectedUserForLocation, setSelectedUserForLocation] = useState<any>(null);
+  const [locationLatitude, setLocationLatitude] = useState<string>('');
+  const [locationLongitude, setLocationLongitude] = useState<string>('');
+  const [locationAddress, setLocationAddress] = useState<string>('');
+  const [allowWorkFromAnywhere, setAllowWorkFromAnywhere] = useState<boolean>(false);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [deleteLocationId, setDeleteLocationId] = useState<string | null>(null);
+  const [deletingLocation, setDeletingLocation] = useState(false);
+  const [usersWithTimeEntryLocations, setUsersWithTimeEntryLocations] = useState<Record<string, { hasLocation: boolean; latestLocation?: { lat: number; lng: number } }>>({});
 
   useEffect(() => {
     loadPendingUsers();
     loadAllUsers();
     loadPendingLocations();
+    loadAllLocations();
   }, []);
 
   const loadPendingUsers = async () => {
@@ -123,6 +141,27 @@ const Settings = () => {
     }
   };
 
+  const loadAllLocations = async () => {
+    if (!db) return;
+    try {
+      setAllLocationsLoading(true);
+      const querySnapshot = await getDocs(collection(db, 'workFromHomeLocations'));
+      const locations = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setAllLocations(locations);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load all locations',
+        variant: 'destructive',
+      });
+    } finally {
+      setAllLocationsLoading(false);
+    }
+  };
+
   const handleApproveLocation = async (locationId: string) => {
     if (!db || !currentUser) return;
     try {
@@ -138,6 +177,7 @@ const Settings = () => {
         description: 'Work from home location has been approved.',
       });
       await loadPendingLocations();
+      await loadAllLocations();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -162,6 +202,7 @@ const Settings = () => {
         description: 'Work from home location has been rejected.',
       });
       await loadPendingLocations();
+      await loadAllLocations();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -170,6 +211,132 @@ const Settings = () => {
       });
     } finally {
       setProcessingLocation(null);
+    }
+  };
+
+  const handleOpenLocationDialog = (user: any) => {
+    setSelectedUserForLocation(user);
+    // Check if user already has a location
+    const existingLocation = allLocations.find(loc => loc.userId === user.id);
+    if (existingLocation) {
+      setLocationLatitude(existingLocation.latitude?.toString() || '');
+      setLocationLongitude(existingLocation.longitude?.toString() || '');
+      setLocationAddress(existingLocation.address || '');
+      setAllowWorkFromAnywhere(existingLocation.allowWorkFromAnywhere || false);
+    } else {
+      setLocationLatitude('');
+      setLocationLongitude('');
+      setLocationAddress('');
+      setAllowWorkFromAnywhere(false);
+    }
+    setLocationDialogOpen(true);
+  };
+
+  const handleSaveUserLocation = async () => {
+    if (!db || !currentUser || !selectedUserForLocation) return;
+
+    const lat = parseFloat(locationLatitude);
+    const lon = parseFloat(locationLongitude);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      toast({
+        title: 'Invalid Coordinates',
+        description: 'Please enter valid latitude and longitude values',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (lat < -90 || lat > 90) {
+      toast({
+        title: 'Invalid Latitude',
+        description: 'Latitude must be between -90 and 90',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (lon < -180 || lon > 180) {
+      toast({
+        title: 'Invalid Longitude',
+        description: 'Longitude must be between -180 and 180',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSavingLocation(true);
+    try {
+      const userName = selectedUserForLocation.name || 
+        `${selectedUserForLocation.firstName || ''} ${selectedUserForLocation.lastName || ''}`.trim() || 
+        selectedUserForLocation.email;
+
+      const existingLocation = allLocations.find(loc => loc.userId === selectedUserForLocation.id);
+      
+      const locationData: any = {
+        userId: selectedUserForLocation.id,
+        userName: userName,
+        latitude: lat,
+        longitude: lon,
+        address: locationAddress || undefined,
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: currentUser.id,
+        approvedByName: currentUser.name || currentUser.email,
+        allowWorkFromAnywhere: allowWorkFromAnywhere,
+        createdAt: existingLocation?.createdAt || serverTimestamp(),
+      };
+
+      await setDoc(doc(db, 'workFromHomeLocations', selectedUserForLocation.id), locationData);
+
+      toast({
+        title: 'Location Saved',
+        description: `Work from home location has been ${existingLocation ? 'updated' : 'set'} for ${userName}.`,
+      });
+
+      setLocationDialogOpen(false);
+      setSelectedUserForLocation(null);
+      setLocationLatitude('');
+      setLocationLongitude('');
+      setLocationAddress('');
+      setAllowWorkFromAnywhere(false);
+      
+      await loadPendingLocations();
+      await loadAllLocations();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save location',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingLocation(false);
+    }
+  };
+
+  const handleDeleteLocation = async () => {
+    if (!db || !deleteLocationId) return;
+
+    setDeletingLocation(true);
+    try {
+      await deleteDoc(doc(db, 'workFromHomeLocations', deleteLocationId));
+      
+      toast({
+        title: 'Location Deleted',
+        description: 'Work from home location has been removed.',
+      });
+
+      setDeleteLocationId(null);
+      await loadPendingLocations();
+      await loadAllLocations();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete location',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingLocation(false);
     }
   };
 
@@ -203,6 +370,55 @@ const Settings = () => {
     } catch (error) {
       console.error(`Error checking profile for user ${userId}:`, error);
       return false;
+    }
+  };
+
+  const checkUserTimeEntryLocations = async (userId: string): Promise<{ hasLocation: boolean; latestLocation?: { lat: number; lng: number } }> => {
+    if (!db) return { hasLocation: false };
+    
+    try {
+      // Query time entries for this user
+      const timeEntriesQuery = query(
+        collection(db, 'timeEntries'),
+        where('userId', '==', userId)
+      );
+      
+      const querySnapshot = await getDocs(timeEntriesQuery);
+      
+      // Find any entry with GPS coordinates (prioritize more recent ones)
+      let latestEntry: { lat: number; lng: number; timestamp: Date } | null = null;
+      
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        if (data.clockInLocation?.latitude && data.clockInLocation?.longitude) {
+          const entryTimestamp = data.clockIn?.toDate?.() || data.createdAt?.toDate?.() || new Date(0);
+          const location = {
+            lat: data.clockInLocation.latitude,
+            lng: data.clockInLocation.longitude,
+            timestamp: entryTimestamp,
+          };
+          
+          // Keep the most recent entry
+          if (!latestEntry || entryTimestamp > latestEntry.timestamp) {
+            latestEntry = location;
+          }
+        }
+      }
+      
+      if (latestEntry) {
+        return {
+          hasLocation: true,
+          latestLocation: {
+            lat: latestEntry.lat,
+            lng: latestEntry.lng,
+          },
+        };
+      }
+      
+      return { hasLocation: false };
+    } catch (error) {
+      console.error(`Error checking time entry locations for user ${userId}:`, error);
+      return { hasLocation: false };
     }
   };
 
@@ -244,6 +460,20 @@ const Settings = () => {
       
       setProfileCompletionStatus(statusMap);
       setLoadingProfileStatus(loadingMap);
+
+      // Check time entry locations for all users in parallel
+      const locationChecks = sortedUsers.map(async (user) => {
+        const locationInfo = await checkUserTimeEntryLocations(user.id);
+        return { userId: user.id, ...locationInfo };
+      });
+      
+      const locationResults = await Promise.all(locationChecks);
+      const locationMap: Record<string, { hasLocation: boolean; latestLocation?: { lat: number; lng: number } }> = {};
+      locationResults.forEach(({ userId, hasLocation, latestLocation }) => {
+        locationMap[userId] = { hasLocation, latestLocation };
+      });
+      
+      setUsersWithTimeEntryLocations(locationMap);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -536,14 +766,14 @@ const Settings = () => {
             <div className="space-y-4">
               <div className="overflow-x-auto">
                 <div className="space-y-3">
-                  <div className="grid grid-cols-7 gap-4 pb-2 border-b">
-                    {Array.from({ length: 7 }).map((_, i) => (
+                  <div className="grid grid-cols-6 gap-4 pb-2 border-b">
+                    {Array.from({ length: 6 }).map((_, i) => (
                       <Skeleton key={i} className="h-4 w-20" />
                     ))}
                   </div>
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="grid grid-cols-7 gap-4 py-2">
-                      {Array.from({ length: 7 }).map((_, j) => (
+                    <div key={i} className="grid grid-cols-6 gap-4 py-2">
+                      {Array.from({ length: 6 }).map((_, j) => (
                         <Skeleton key={j} className="h-8 w-full" />
                       ))}
                     </div>
@@ -592,7 +822,6 @@ const Settings = () => {
                       <TableHead>Profile Completed</TableHead>
                       <TableHead>Registered</TableHead>
                       <TableHead>Approved By</TableHead>
-                      <TableHead>Contract</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -685,57 +914,6 @@ const Settings = () => {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {user.approvedByName || user.approvedBy || 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {user.contractUrl ? (
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-green-600" />
-                              <a
-                                href={user.contractUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm text-primary hover:underline flex items-center gap-1"
-                              >
-                                <Download className="h-3 w-3" />
-                                View
-                              </a>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-muted-foreground">No contract</span>
-                            </div>
-                          )}
-                          <input
-                            type="file"
-                            ref={(el) => {
-                              fileInputRefs.current[user.id] = el;
-                            }}
-                            accept=".pdf,.doc,.docx"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                handleFileUpload(user.id, file);
-                              }
-                            }}
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => fileInputRefs.current[user.id]?.click()}
-                            disabled={uploading[user.id]}
-                          >
-                            {uploading[user.id] ? (
-                              <Skeleton className="h-4 w-16" />
-                            ) : (
-                              <>
-                                <Upload className="h-4 w-4 mr-1" />
-                                {user.contractUrl ? 'Replace' : 'Upload'}
-                              </>
-                            )}
-                          </Button>
-                        </div>
                       </TableCell>
                     </TableRow>
                     );
@@ -856,6 +1034,178 @@ const Settings = () => {
                 ))}
               </TableBody>
             </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>All Work From Home Locations</CardTitle>
+          <CardDescription>
+            View and manage all user work from home locations. You can set or update locations for any user.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {allLocationsLoading ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-7 gap-4 pb-2 border-b">
+                    {Array.from({ length: 7 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-7 gap-4 py-2">
+                      {Array.from({ length: 7 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">
+                  {allLocations.length} location{allLocations.length !== 1 ? 's' : ''} found
+                </p>
+              </div>
+              {allLocations.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No work from home locations found
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>User</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Location Restriction</TableHead>
+                        <TableHead>Coordinates</TableHead>
+                        <TableHead>Address</TableHead>
+                        <TableHead>Approved By</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {allLocations.map((location) => {
+                        const user = allUsers.find(u => u.id === location.userId);
+                        const userName = user ? (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email) : (location.userName || 'Unknown User');
+                        return (
+                          <TableRow key={location.id}>
+                            <TableCell className="font-medium">
+                              {userName}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  location.status === 'approved'
+                                    ? 'default'
+                                    : location.status === 'pending'
+                                    ? 'secondary'
+                                    : 'destructive'
+                                }
+                              >
+                                {location.status || 'pending'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {location.status === 'approved' ? (
+                                location.allowWorkFromAnywhere ? (
+                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                                    Can work from anywhere
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                                    Restricted to 50m radius
+                                  </Badge>
+                                )
+                              ) : (
+                                <span className="text-sm text-muted-foreground">N/A</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-sm">
+                                <div>Lat: {location.latitude?.toFixed(6)}</div>
+                                <div>Lng: {location.longitude?.toFixed(6)}</div>
+                                <a
+                                  href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary hover:underline text-xs flex items-center gap-1 mt-1"
+                                >
+                                  <MapPin className="h-3 w-3" />
+                                  View on Map
+                                </a>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {location.address || (
+                                <span className="text-muted-foreground text-sm">No address provided</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {location.approvedByName || 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {user && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleOpenLocationDialog(user)}
+                                    disabled={editingLocation === location.id}
+                                  >
+                                    <Edit className="h-4 w-4 mr-1" />
+                                    {location.status === 'approved' ? 'Update' : 'Set'}
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setDeleteLocationId(location.id)}
+                                  disabled={deletingLocation}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <div className="pt-4 border-t">
+                <p className="text-sm text-muted-foreground mb-4">
+                  To set a work from home location for a user who doesn't have one, select them from the User Management table above and use the "Set Location" action.
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {allUsers
+                    .filter(user => !allLocations.find(loc => loc.userId === user.id))
+                    .slice(0, 10)
+                    .map((user) => {
+                      const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+                      return (
+                        <Button
+                          key={user.id}
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleOpenLocationDialog(user)}
+                        >
+                          <MapPin className="h-4 w-4 mr-1" />
+                          Set Location for {userName}
+                        </Button>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -1139,6 +1489,177 @@ const Settings = () => {
           userName={viewingProfileUserName}
         />
       )}
+
+      {/* Set/Update Location Dialog */}
+      <Dialog open={locationDialogOpen} onOpenChange={setLocationDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedUserForLocation ? (
+                <>
+                  {allLocations.find(loc => loc.userId === selectedUserForLocation.id)
+                    ? 'Update' : 'Set'} Work From Home Location
+                </>
+              ) : 'Set Work From Home Location'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedUserForLocation && (
+                <>
+                  Set or update the work from home location for{' '}
+                  <strong>
+                    {selectedUserForLocation.name || 
+                      `${selectedUserForLocation.firstName || ''} ${selectedUserForLocation.lastName || ''}`.trim() || 
+                      selectedUserForLocation.email}
+                  </strong>
+                  . By default, users can only clock in/out within 50 meters of this location. You can enable "Allow work from any location" to override this restriction.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-4">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="location-latitude">Latitude</Label>
+                <Input
+                  id="location-latitude"
+                  type="number"
+                  step="any"
+                  value={locationLatitude}
+                  onChange={(e) => setLocationLatitude(e.target.value)}
+                  placeholder="e.g., -37.8136"
+                />
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="location-longitude">Longitude</Label>
+                <Input
+                  id="location-longitude"
+                  type="number"
+                  step="any"
+                  value={locationLongitude}
+                  onChange={(e) => setLocationLongitude(e.target.value)}
+                  placeholder="e.g., 144.9631"
+                />
+              </div>
+            </div>
+            <div className="flex items-start justify-between p-4 border-2 rounded-lg bg-accent/50 gap-4">
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="allow-anywhere" className="text-base font-semibold cursor-pointer">
+                    Allow work from any location
+                  </Label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  When enabled, this user can clock in/out from anywhere, not just their preferred work from home location. When disabled, they must be within 50 meters of the approved location.
+                </p>
+              </div>
+              <Switch
+                id="allow-anywhere"
+                checked={allowWorkFromAnywhere}
+                onCheckedChange={setAllowWorkFromAnywhere}
+                className="mt-1 flex-shrink-0"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="location-address">Address (Optional)</Label>
+              <Textarea
+                id="location-address"
+                value={locationAddress}
+                onChange={(e) => setLocationAddress(e.target.value)}
+                placeholder="e.g., 123 Main St, Melbourne, VIC 3000"
+                rows={2}
+              />
+            </div>
+            {locationLatitude && locationLongitude && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Preview Location</Label>
+                  <a
+                    href={`https://www.google.com/maps?q=${locationLatitude},${locationLongitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline text-sm"
+                  >
+                    Open in Google Maps →
+                  </a>
+                </div>
+                <div className="w-full h-[300px] rounded-lg overflow-hidden border">
+                  <iframe
+                    width="100%"
+                    height="100%"
+                    style={{ border: 0 }}
+                    loading="lazy"
+                    allowFullScreen
+                    referrerPolicy="no-referrer-when-downgrade"
+                    src={`https://maps.google.com/maps?q=${locationLatitude},${locationLongitude}&hl=en&z=15&output=embed`}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLocationDialogOpen(false);
+                setSelectedUserForLocation(null);
+                setLocationLatitude('');
+                setLocationLongitude('');
+                setLocationAddress('');
+                setAllowWorkFromAnywhere(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveUserLocation}
+              disabled={savingLocation || !locationLatitude || !locationLongitude}
+            >
+              {savingLocation ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Location'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Location Confirmation Dialog */}
+      <AlertDialog open={!!deleteLocationId} onOpenChange={(open) => !open && setDeleteLocationId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Work From Home Location</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const locationToDelete = allLocations.find(loc => loc.id === deleteLocationId);
+                const user = locationToDelete ? allUsers.find(u => u.id === locationToDelete.userId) : null;
+                const userName = user ? (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email) : (locationToDelete?.userName || 'Unknown User');
+                return `Are you sure you want to delete the work from home location for ${userName}? This action cannot be undone. The user will need to set a new location if they want to work from home.`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingLocation}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteLocation}
+              disabled={deletingLocation}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingLocation ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Location'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

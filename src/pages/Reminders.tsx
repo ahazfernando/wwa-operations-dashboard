@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Calendar, Trash2, Edit, Bell, CheckCircle2, Circle, AlertCircle, Image as ImageIcon, Upload, X, Loader2 } from 'lucide-react';
+import { Plus, Calendar, Trash2, Edit, Bell, CheckCircle2, Circle, AlertCircle, Image as ImageIcon, Upload, X, Loader2, Search, ChevronDown, Users } from 'lucide-react';
 import { Reminder } from '@/types/reminder';
 import { createReminder, getRemindersByUser, updateReminder, deleteReminder } from '@/lib/reminders';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
@@ -23,20 +23,29 @@ import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
 const Reminders = () => {
-  const { user } = useAuth();
+  const { user, getAllUsers } = useAuth();
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [reminderToDelete, setReminderToDelete] = useState<Reminder | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
   
   // Form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState<Date | undefined>(new Date());
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [assignedMembers, setAssignedMembers] = useState<string[]>([]);
   const [selectedImageFiles, setSelectedImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [existingImages, setExistingImages] = useState<string[]>([]);
@@ -46,8 +55,26 @@ const Reminders = () => {
   useEffect(() => {
     if (user) {
       loadReminders();
+      loadUsers();
     }
   }, [user]);
+
+  const loadUsers = async () => {
+    try {
+      const allUsers = await getAllUsers();
+      // Filter only approved users
+      const approvedUsers = allUsers
+        .filter((u: any) => u.status === 'approved')
+        .map((u: any) => ({
+          id: u.id,
+          name: u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
+          email: u.email,
+        }));
+      setUsers(approvedUsers);
+    } catch (error: any) {
+      console.error('Error loading users:', error);
+    }
+  };
 
   const loadReminders = async () => {
     if (!user) return;
@@ -74,6 +101,7 @@ const Reminders = () => {
       setDescription(reminder.description || '');
       setDueDate(reminder.dueDate);
       setPriority(reminder.priority || 'medium');
+      setAssignedMembers(reminder.assignedMembers || []);
       setSelectedImageFiles([]);
       setExistingImages(reminder.images || []);
       setImagePreviews(reminder.images || []);
@@ -83,10 +111,12 @@ const Reminders = () => {
       setDescription('');
       setDueDate(new Date());
       setPriority('medium');
+      setAssignedMembers([]);
       setSelectedImageFiles([]);
       setExistingImages([]);
       setImagePreviews([]);
     }
+    setMemberSearchQuery('');
     setDialogOpen(true);
   };
 
@@ -97,9 +127,19 @@ const Reminders = () => {
     setDescription('');
     setDueDate(new Date());
     setPriority('medium');
+    setAssignedMembers([]);
     setSelectedImageFiles([]);
     setExistingImages([]);
     setImagePreviews([]);
+    setMemberSearchQuery('');
+  };
+
+  const handleMemberToggle = (userId: string) => {
+    setAssignedMembers(prev =>
+      prev.includes(userId)
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    );
   };
 
   const validateAndAddImages = (files: File[]) => {
@@ -231,6 +271,14 @@ const Reminders = () => {
 
       setUploadingImages(false);
 
+      // Get assigned member names
+      const assignedMemberNames = assignedMembers
+        .map(userId => {
+          const user = users.find(u => u.id === userId);
+          return user?.name || '';
+        })
+        .filter(Boolean);
+
       if (editingReminder) {
         await updateReminder(editingReminder.id, {
           title: title.trim(),
@@ -238,6 +286,8 @@ const Reminders = () => {
           dueDate,
           priority,
           images: uploadedImages.length > 0 ? uploadedImages : undefined,
+          assignedMembers: assignedMembers.length > 0 ? assignedMembers : undefined,
+          assignedMemberNames: assignedMemberNames.length > 0 ? assignedMemberNames : undefined,
         });
         toast({
           title: 'Success',
@@ -251,6 +301,8 @@ const Reminders = () => {
           userId: user.id,
           priority,
           images: uploadedImages.length > 0 ? uploadedImages : undefined,
+          assignedMembers: assignedMembers.length > 0 ? assignedMembers : undefined,
+          assignedMemberNames: assignedMemberNames.length > 0 ? assignedMemberNames : undefined,
         });
         toast({
           title: 'Success',
@@ -522,6 +574,93 @@ const Reminders = () => {
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>Assign Members</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      className={cn(
+                        "w-full justify-between",
+                        assignedMembers.length === 0 && "text-muted-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        {assignedMembers.length === 0
+                          ? "Select members to assign"
+                          : assignedMembers.length === 1
+                          ? users.find(u => u.id === assignedMembers[0])?.name || "1 member selected"
+                          : `${assignedMembers.length} members selected`}
+                      </div>
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0" align="start" onWheel={(e) => e.stopPropagation()}>
+                    <div className="p-3 border-b">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search members..."
+                          value={memberSearchQuery}
+                          onChange={(e) => setMemberSearchQuery(e.target.value)}
+                          className="pl-10"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    </div>
+                    <div 
+                      className="max-h-64 overflow-y-auto overscroll-contain"
+                      style={{ maxHeight: '16rem' }}
+                      tabIndex={0}
+                      onWheel={(e) => e.stopPropagation()}
+                    >
+                      {users
+                        .filter((user) => {
+                          if (!memberSearchQuery.trim()) return true;
+                          const query = memberSearchQuery.toLowerCase();
+                          return (
+                            user.name.toLowerCase().includes(query) ||
+                            user.email.toLowerCase().includes(query)
+                          );
+                        })
+                        .map((user) => (
+                          <div key={user.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-accent cursor-pointer">
+                            <Checkbox
+                              id={`member-${user.id}`}
+                              checked={assignedMembers.includes(user.id)}
+                              onCheckedChange={() => handleMemberToggle(user.id)}
+                            />
+                            <label
+                              htmlFor={`member-${user.id}`}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                            >
+                              {user.name}
+                            </label>
+                          </div>
+                        ))}
+                      {users.filter((user) => {
+                        if (!memberSearchQuery.trim()) return false;
+                        const query = memberSearchQuery.toLowerCase();
+                        return (
+                          user.name.toLowerCase().includes(query) ||
+                          user.email.toLowerCase().includes(query)
+                        );
+                      }).length === 0 && (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          No members found
+                        </div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                {assignedMembers.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {assignedMembers.length} member{assignedMembers.length !== 1 ? 's' : ''} will be notified
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
                 <Label>Images</Label>
                 <div
                   onDragOver={handleDragOver}
@@ -660,6 +799,27 @@ const Reminders = () => {
                       ))}
                     </div>
                   )}
+                  {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <Users className="h-4 w-4" />
+                        <span>Assigned to:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0 ? (
+                          reminder.assignedMemberNames.map((name, index) => (
+                            <Badge key={index} variant="secondary" className="text-xs">
+                              {name}
+                            </Badge>
+                          ))
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">
+                            {reminder.assignedMembers.length} member{reminder.assignedMembers.length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <Button
                       variant="ghost"
@@ -739,6 +899,27 @@ const Reminders = () => {
                           />
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <Users className="h-4 w-4" />
+                        <span>Assigned to:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0 ? (
+                          reminder.assignedMemberNames.map((name, index) => (
+                            <Badge key={index} variant="secondary" className="text-xs">
+                              {name}
+                            </Badge>
+                          ))
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">
+                            {reminder.assignedMembers.length} member{reminder.assignedMembers.length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   )}
                   <div className="flex items-center justify-between">

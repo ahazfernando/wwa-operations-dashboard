@@ -10,6 +10,8 @@ export interface Reminder {
   updatedAt: Date;
   priority?: 'low' | 'medium' | 'high';
   images?: string[]; // Array of image URLs
+  assignedMembers?: string[]; // Array of user IDs who are assigned to this reminder
+  assignedMemberNames?: string[]; // Array of user names for display
 }
 
 export interface FirestoreReminder {
@@ -24,5 +26,7 @@ export interface FirestoreReminder {
   updatedAt: any; // Firestore Timestamp
   priority?: 'low' | 'medium' | 'high';
   images?: string[]; // Array of image URLs
+  assignedMembers?: string[]; // Array of user IDs who are assigned to this reminder
+  assignedMemberNames?: string[]; // Array of user names for display
 }
 

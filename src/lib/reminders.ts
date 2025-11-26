@@ -18,6 +18,8 @@ export function convertFirestoreReminder(docData: any, docId: string): Reminder 
     updatedAt: docData.updatedAt?.toDate() || new Date(),
     priority: docData.priority || 'medium',
     images: docData.images || undefined,
+    assignedMembers: docData.assignedMembers || undefined,
+    assignedMemberNames: docData.assignedMemberNames || undefined,
   };
 }
 
@@ -31,6 +33,8 @@ export async function createReminder(reminderData: {
   userId: string;
   priority?: 'low' | 'medium' | 'high';
   images?: string[];
+  assignedMembers?: string[];
+  assignedMemberNames?: string[];
 }): Promise<string> {
   if (!db) {
     throw new Error('Firebase is not initialized. Please check your environment variables.');
@@ -49,6 +53,8 @@ export async function createReminder(reminderData: {
       updatedAt: now,
       priority: reminderData.priority || 'medium',
       images: reminderData.images || null,
+      assignedMembers: reminderData.assignedMembers || null,
+      assignedMemberNames: reminderData.assignedMemberNames || null,
     });
 
     return docRef.id;
@@ -70,6 +76,8 @@ export async function updateReminder(
     completed?: boolean;
     priority?: 'low' | 'medium' | 'high';
     images?: string[];
+    assignedMembers?: string[];
+    assignedMemberNames?: string[];
   }
 ): Promise<void> {
   if (!db) {
@@ -94,6 +102,8 @@ export async function updateReminder(
     }
     if (updates.priority !== undefined) updateData.priority = updates.priority;
     if (updates.images !== undefined) updateData.images = updates.images.length > 0 ? updates.images : null;
+    if (updates.assignedMembers !== undefined) updateData.assignedMembers = updates.assignedMembers.length > 0 ? updates.assignedMembers : null;
+    if (updates.assignedMemberNames !== undefined) updateData.assignedMemberNames = updates.assignedMemberNames.length > 0 ? updates.assignedMemberNames : null;
 
     await updateDoc(doc(db, 'reminders', reminderId), updateData);
   } catch (error) {
@@ -119,7 +129,7 @@ export async function deleteReminder(reminderId: string): Promise<void> {
 }
 
 /**
- * Get all reminders for a specific user
+ * Get all reminders for a specific user (owned by user or assigned to user)
  */
 export async function getRemindersByUser(userId: string): Promise<Reminder[]> {
   if (!db) {
@@ -127,17 +137,41 @@ export async function getRemindersByUser(userId: string): Promise<Reminder[]> {
   }
 
   try {
-    const q = query(
+    // Get reminders owned by the user
+    const ownedQuery = query(
       collection(db, 'reminders'),
       where('userId', '==', userId)
     );
-    const querySnapshot = await getDocs(q);
+    const ownedSnapshot = await getDocs(ownedQuery);
     
-    const reminders = querySnapshot.docs.map(doc => 
+    // Get reminders where user is in assignedMembers
+    // Note: Firestore doesn't support array-contains with multiple queries easily,
+    // so we'll fetch all reminders and filter in memory
+    const allRemindersQuery = query(collection(db, 'reminders'));
+    const allRemindersSnapshot = await getDocs(allRemindersQuery);
+    
+    const allReminders = allRemindersSnapshot.docs.map(doc => 
       convertFirestoreReminder(doc.data(), doc.id)
     );
     
-    // Sort by dueDate in memory to avoid requiring a composite index
+    // Filter reminders where user is assigned
+    const assignedReminders = allReminders.filter(reminder => 
+      reminder.assignedMembers?.includes(userId)
+    );
+    
+    // Combine owned and assigned reminders, removing duplicates
+    const ownedReminders = ownedSnapshot.docs.map(doc => 
+      convertFirestoreReminder(doc.data(), doc.id)
+    );
+    
+    const reminderMap = new Map<string, Reminder>();
+    [...ownedReminders, ...assignedReminders].forEach(reminder => {
+      reminderMap.set(reminder.id, reminder);
+    });
+    
+    const reminders = Array.from(reminderMap.values());
+    
+    // Sort by dueDate in memory
     return reminders.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   } catch (error) {
     console.error('Error fetching reminders:', error);

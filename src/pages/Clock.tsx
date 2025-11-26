@@ -11,10 +11,10 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Clock as ClockIcon, LogIn, LogOut, Calendar as CalendarIcon, Plus, Loader2, Users, Activity, Search, Edit, UserPlus, Trash2, MapPin, MoreVertical, Grid3x3, List } from 'lucide-react';
+import { Clock as ClockIcon, LogIn, LogOut, Calendar as CalendarIcon, Plus, Loader2, Users, Activity, Search, Edit, UserPlus, Trash2, MapPin, MoreVertical, Grid3x3, List, Coffee, ChevronDown, ChevronUp } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay } from 'date-fns';
 import { type DateRange } from 'react-day-picker';
 import { cn } from '@/lib/utils';
 import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, Timestamp } from 'firebase/firestore';
@@ -28,6 +28,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, PaginationEllipsis } from '@/components/ui/pagination';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { UserDateRangeDetailsDialog } from '@/components/clock/UserDateRangeDetailsDialog';
+import { Switch } from '@/components/ui/switch';
+
+interface Break {
+  startTime: Date;
+  endTime: Date | null;
+  duration: number | null; // in minutes
+}
 
 interface TimeEntry {
   id: string;
@@ -38,6 +46,7 @@ interface TimeEntry {
   clockIn: Date | null;
   clockOut: Date | null;
   totalHours: number | null;
+  breaks?: Break[];
   clockInLocation?: {
     latitude: number | null;
     longitude: number | null;
@@ -77,8 +86,15 @@ interface MergedTimeEntry {
   totalHours: number;
   sessionCount: number;
   isActive: boolean;
+  breaks?: Break[];
   clockInLocation?: LocationData;
   clockInSystemLocation?: SystemLocationData;
+}
+
+interface FirestoreBreak {
+  startTime: Timestamp;
+  endTime: Timestamp | null;
+  duration: number | null; // in minutes
 }
 
 interface FirestoreTimeEntry {
@@ -88,6 +104,7 @@ interface FirestoreTimeEntry {
   clockIn: Timestamp | null;
   clockOut: Timestamp | null;
   totalHours: number | null;
+  breaks?: FirestoreBreak[];
   clockInLocation?: {
     latitude: number | null;
     longitude: number | null;
@@ -124,6 +141,8 @@ const Clock = () => {
   const [loading, setLoading] = useState(true);
   const [isClockedIn, setIsClockedIn] = useState(false);
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
+  const [isOnBreak, setIsOnBreak] = useState(false);
+  const [currentBreakStart, setCurrentBreakStart] = useState<Date | null>(null);
   const [openManualEntry, setOpenManualEntry] = useState(false);
   const [manualDate, setManualDate] = useState<Date>(new Date());
   const [manualClockIn, setManualClockIn] = useState('');
@@ -163,6 +182,12 @@ const Clock = () => {
   const [sessionDetailsOpen, setSessionDetailsOpen] = useState(false);
   const [selectedUserSessions, setSelectedUserSessions] = useState<TimeEntry[]>([]);
   const [selectedUserInfo, setSelectedUserInfo] = useState<{ userId: string; name: string; email: string; date: Date } | null>(null);
+  
+  // Date range details dialog states
+  const [dateRangeDetailsOpen, setDateRangeDetailsOpen] = useState(false);
+  const [selectedUserForRange, setSelectedUserForRange] = useState<{ userId: string; name: string; email: string } | null>(null);
+  const [selectedUserRangeEntries, setSelectedUserRangeEntries] = useState<TimeEntry[]>([]);
+  const [selectedUserLeaveDays, setSelectedUserLeaveDays] = useState(0);
   
   // Admin edit states
   const [editEntryOpen, setEditEntryOpen] = useState(false);
@@ -284,6 +309,19 @@ const Clock = () => {
       if (activeEntryDoc) {
         const entry = activeEntryDoc.data;
         setIsClockedIn(true);
+        
+        // Check if there's an active break (break with no endTime)
+        const breaks = entry.breaks || [];
+        const activeBreak = breaks.find(b => b.startTime && !b.endTime);
+        
+        if (activeBreak) {
+          setIsOnBreak(true);
+          setCurrentBreakStart(activeBreak.startTime.toDate());
+        } else {
+          setIsOnBreak(false);
+          setCurrentBreakStart(null);
+        }
+        
         setCurrentEntry({
           id: activeEntryDoc.id,
           userId: entry.userId,
@@ -291,6 +329,11 @@ const Clock = () => {
           clockIn: entry.clockIn.toDate(),
           clockOut: entry.clockOut?.toDate() || null,
           totalHours: entry.totalHours || null,
+          breaks: entry.breaks ? entry.breaks.map(b => ({
+            startTime: b.startTime.toDate(),
+            endTime: b.endTime?.toDate() || null,
+            duration: b.duration || null,
+          })) : undefined,
           clockInLocation: entry.clockInLocation ? {
             latitude: entry.clockInLocation.latitude,
             longitude: entry.clockInLocation.longitude,
@@ -314,6 +357,8 @@ const Clock = () => {
       } else {
         setIsClockedIn(false);
         setCurrentEntry(null);
+        setIsOnBreak(false);
+        setCurrentBreakStart(null);
       }
     } catch (error) {
       console.error('Error checking status:', error);
@@ -342,6 +387,11 @@ const Clock = () => {
           clockIn: data.clockIn?.toDate() || null,
           clockOut: data.clockOut?.toDate() || null,
           totalHours: data.totalHours || null,
+          breaks: data.breaks ? data.breaks.map(b => ({
+            startTime: b.startTime.toDate(),
+            endTime: b.endTime?.toDate() || null,
+            duration: b.duration || null,
+          })) : undefined,
           clockInLocation: data.clockInLocation ? {
             latitude: data.clockInLocation.latitude,
             longitude: data.clockInLocation.longitude,
@@ -476,23 +526,27 @@ const Clock = () => {
               if (workFromHomeData.status === 'approved' && 
                   workFromHomeData.latitude && 
                   workFromHomeData.longitude) {
-                // Check if user is within 50m radius
-                const withinRadius = isWithinRadius(
-                  employeeLocation.latitude,
-                  employeeLocation.longitude,
-                  workFromHomeData.latitude,
-                  workFromHomeData.longitude,
-                  50 // 50 meters
-                );
+                // Only check location restriction if user doesn't have permission to work from anywhere
+                if (!workFromHomeData.allowWorkFromAnywhere) {
+                  // Check if user is within 50m radius
+                  const withinRadius = isWithinRadius(
+                    employeeLocation.latitude,
+                    employeeLocation.longitude,
+                    workFromHomeData.latitude,
+                    workFromHomeData.longitude,
+                    50 // 50 meters
+                  );
 
-                if (!withinRadius) {
-                  toast({
-                    title: 'Location Not Allowed',
-                    description: 'You must be within 50 meters of your approved work from home location to clock in. Please move closer to your approved location.',
-                    variant: 'destructive',
-                  });
-                  return;
+                  if (!withinRadius) {
+                    toast({
+                      title: 'Location Not Allowed',
+                      description: 'You must be within 50 meters of your approved work from home location to clock in. Please move closer to your approved location.',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
                 }
+                // If allowWorkFromAnywhere is true, skip location check and allow clock-in
               }
             }
           } catch (locationCheckError) {
@@ -664,12 +718,129 @@ const Clock = () => {
 
       setIsClockedIn(false);
       setCurrentEntry(null);
+      setIsOnBreak(false);
+      setCurrentBreakStart(null);
       await checkCurrentStatus(); // Refresh status to ensure UI is in sync
       await loadTimeEntries();
     } catch (error: any) {
       toast({
         title: 'Error',
         description: error.message || 'Failed to clock out',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleStartBreak = async () => {
+    if (!user || !currentEntry || isOnBreak) return;
+
+    try {
+      const now = new Date();
+      const existingBreaks = currentEntry.breaks || [];
+      
+      // Convert existing breaks to Firestore format
+      const breaks: FirestoreBreak[] = existingBreaks.map(b => ({
+        startTime: b.startTime instanceof Date ? Timestamp.fromDate(b.startTime) : b.startTime as Timestamp,
+        endTime: b.endTime ? (b.endTime instanceof Date ? Timestamp.fromDate(b.endTime) : b.endTime as Timestamp) : null,
+        duration: b.duration,
+      }));
+      
+      // Add new break with start time
+      const newBreak: FirestoreBreak = {
+        startTime: Timestamp.fromDate(now),
+        endTime: null,
+        duration: null,
+      };
+      
+      breaks.push(newBreak);
+
+      await updateDoc(doc(db, 'timeEntries', currentEntry.id), {
+        breaks: breaks,
+        updatedAt: serverTimestamp(),
+      });
+
+      setIsOnBreak(true);
+      setCurrentBreakStart(now);
+      
+      toast({
+        title: 'Break Started',
+        description: `Break started at ${format(now, 'h:mm a')}`,
+      });
+
+      await checkCurrentStatus();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to start break',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEndBreak = async () => {
+    if (!user || !currentEntry || !isOnBreak) return;
+
+    try {
+      const now = new Date();
+      const existingBreaks = currentEntry.breaks || [];
+      
+      // Find the active break (the one without an endTime)
+      const activeBreakIndex = existingBreaks.findIndex(b => b.startTime && !b.endTime);
+      
+      if (activeBreakIndex === -1) {
+        toast({
+          title: 'Error',
+          description: 'No active break found',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const breakStartTime = existingBreaks[activeBreakIndex].startTime;
+      const breakStartDate = breakStartTime instanceof Date ? breakStartTime : (breakStartTime as Timestamp).toDate();
+      const durationMinutes = Math.round((now.getTime() - breakStartDate.getTime()) / (1000 * 60));
+
+      // Convert all breaks to Firestore format
+      const breaks: FirestoreBreak[] = existingBreaks.map((b, idx) => {
+        if (idx === activeBreakIndex) {
+          // Update the active break
+          return {
+            startTime: breakStartTime instanceof Date ? Timestamp.fromDate(breakStartTime) : breakStartTime as Timestamp,
+            endTime: Timestamp.fromDate(now),
+            duration: durationMinutes,
+          };
+        } else {
+          // Keep existing breaks as-is (convert if needed)
+          return {
+            startTime: b.startTime instanceof Date ? Timestamp.fromDate(b.startTime) : b.startTime as Timestamp,
+            endTime: b.endTime ? (b.endTime instanceof Date ? Timestamp.fromDate(b.endTime) : b.endTime as Timestamp) : null,
+            duration: b.duration,
+          };
+        }
+      });
+
+      await updateDoc(doc(db, 'timeEntries', currentEntry.id), {
+        breaks: breaks,
+        updatedAt: serverTimestamp(),
+      });
+
+      setIsOnBreak(false);
+      setCurrentBreakStart(null);
+      
+      const hours = Math.floor(durationMinutes / 60);
+      const minutes = durationMinutes % 60;
+      const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+      
+      toast({
+        title: 'Break Ended',
+        description: `Break ended at ${format(now, 'h:mm a')}. Duration: ${durationText}`,
+      });
+
+      await checkCurrentStatus();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to end break',
         variant: 'destructive',
       });
     }
@@ -786,9 +957,93 @@ const Clock = () => {
     return format(date, 'MMM dd, yyyy');
   };
 
+  // Function to fetch leave days for a user within a date range
+  const fetchLeaveDays = async (userId: string, fromDate: Date, toDate: Date): Promise<number> => {
+    if (!db) return 0;
+    
+    try {
+      const fromTimestamp = Timestamp.fromDate(fromDate);
+      const toTimestamp = Timestamp.fromDate(toDate);
+      
+      // Query for approved leave requests that overlap with the date range
+      const leaveQuery = query(
+        collection(db, 'leaveRequests'),
+        where('uid', '==', userId),
+        where('status', '==', 'approved')
+      );
+      
+      const leaveSnapshot = await getDocs(leaveQuery);
+      const leaveDaysSet = new Set<string>();
+      const rangeStart = startOfDay(fromDate);
+      const rangeEnd = endOfDay(toDate);
+      
+      leaveSnapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        const leaveFrom = data.fromDate?.toDate();
+        const leaveTo = data.toDate?.toDate();
+        
+        if (leaveFrom && leaveTo) {
+          // Check if leave overlaps with the date range
+          const leaveStart = startOfDay(leaveFrom);
+          const leaveEnd = endOfDay(leaveTo);
+          
+          // Calculate overlapping days
+          if (leaveEnd >= rangeStart && leaveStart <= rangeEnd) {
+            const overlapStart = leaveStart > rangeStart ? leaveStart : rangeStart;
+            const overlapEnd = leaveEnd < rangeEnd ? leaveEnd : rangeEnd;
+            
+            // Add each day in the overlap to the set (to avoid double counting)
+            const currentDate = new Date(overlapStart);
+            while (currentDate <= overlapEnd) {
+              leaveDaysSet.add(format(currentDate, 'yyyy-MM-dd'));
+              currentDate.setDate(currentDate.getDate() + 1);
+            }
+          }
+        }
+      });
+      
+      return leaveDaysSet.size;
+    } catch (error) {
+      console.error('Error fetching leave days:', error);
+      return 0;
+    }
+  };
+
   // Function to show session details for a user
-  const handleShowSessions = (userId: string, userName: string, userEmail: string, date: Date) => {
-    // Filter entries for this specific user and date
+  const handleShowSessions = async (userId: string, userName: string, userEmail: string, date: Date) => {
+    // If admin has selected a date range, show date range details
+    if (isAdmin && dateRange?.from && dateRange?.to) {
+      const fromDate = new Date(dateRange.from);
+      fromDate.setHours(0, 0, 0, 0);
+      const toDate = new Date(dateRange.to);
+      toDate.setHours(23, 59, 59, 999);
+      
+      // Filter entries for this user within the date range
+      const userRangeEntries = allUsersEntries.filter(entry => {
+        const entryDate = new Date(entry.date);
+        entryDate.setHours(0, 0, 0, 0);
+        return entry.userId === userId && entryDate >= fromDate && entryDate <= toDate;
+      });
+      
+      // Sort by date, then by clock in time
+      userRangeEntries.sort((a, b) => {
+        const dateCompare = a.date.getTime() - b.date.getTime();
+        if (dateCompare !== 0) return dateCompare;
+        if (!a.clockIn || !b.clockIn) return 0;
+        return a.clockIn.getTime() - b.clockIn.getTime();
+      });
+      
+      // Fetch leave days
+      const leaveDays = await fetchLeaveDays(userId, fromDate, toDate);
+      
+      setSelectedUserRangeEntries(userRangeEntries);
+      setSelectedUserForRange({ userId, name: userName, email: userEmail });
+      setSelectedUserLeaveDays(leaveDays);
+      setDateRangeDetailsOpen(true);
+      return;
+    }
+    
+    // Otherwise, show single date session details (existing behavior)
     const userSessions = allUsersEntries.filter(entry => {
       const entryDate = format(entry.date, 'yyyy-MM-dd');
       const targetDate = format(date, 'yyyy-MM-dd');
@@ -806,33 +1061,64 @@ const Clock = () => {
     setSessionDetailsOpen(true);
   };
 
-  // Function to open edit dialog for an entry
-  const handleEditEntry = (entry: TimeEntry, sessionNumber?: number) => {
-    setEditingEntry(entry);
-    setEditingSessionNumber(sessionNumber || null);
-    setEditDate(entry.date);
-    
-    // Format times for input fields (HH:MM format)
-    if (entry.clockIn) {
-      const hours = entry.clockIn.getHours().toString().padStart(2, '0');
-      const minutes = entry.clockIn.getMinutes().toString().padStart(2, '0');
-      setEditClockIn(`${hours}:${minutes}`);
+  // Function to open edit dialog for an entry (or create new entry)
+  const handleEditEntry = async (entry: TimeEntry | null, sessionNumber?: number, date?: Date, userId?: string) => {
+    if (entry) {
+      // Editing existing entry
+      setEditingEntry(entry);
+      setEditingSessionNumber(sessionNumber || null);
+      setEditDate(entry.date);
+      
+      // Format times for input fields (HH:MM format)
+      if (entry.clockIn) {
+        const hours = entry.clockIn.getHours().toString().padStart(2, '0');
+        const minutes = entry.clockIn.getMinutes().toString().padStart(2, '0');
+        setEditClockIn(`${hours}:${minutes}`);
+      } else {
+        setEditClockIn('');
+      }
+      
+      if (entry.clockOut) {
+        const hours = entry.clockOut.getHours().toString().padStart(2, '0');
+        const minutes = entry.clockOut.getMinutes().toString().padStart(2, '0');
+        setEditClockOut(`${hours}:${minutes}`);
+      } else {
+        setEditClockOut('');
+      }
     } else {
+      // Creating new entry
+      setEditingEntry(null);
+      setEditingSessionNumber(null);
+      setEditDate(date || new Date());
       setEditClockIn('');
-    }
-    
-    if (entry.clockOut) {
-      const hours = entry.clockOut.getHours().toString().padStart(2, '0');
-      const minutes = entry.clockOut.getMinutes().toString().padStart(2, '0');
-      setEditClockOut(`${hours}:${minutes}`);
-    } else {
       setEditClockOut('');
+      // Store userId for new entry creation
+      if (userId) {
+        // Get user info for the new entry
+        const users = await getAllUsers();
+        const targetUser = users.find((u: any) => u.id === userId);
+        const userName = targetUser?.name || `${targetUser?.firstName || ''} ${targetUser?.lastName || ''}`.trim() || targetUser?.email || 'Unknown';
+        const userEmail = targetUser?.email || '';
+        
+        setEditingEntry({ 
+          id: '', 
+          userId, 
+          userName,
+          userEmail,
+          date: date || new Date(), 
+          clockIn: null, 
+          clockOut: null, 
+          totalHours: null,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry);
+      }
     }
     
     setEditEntryOpen(true);
   };
 
-  // Function to save edited entry
+  // Function to save edited entry or create new entry
   const handleSaveEdit = async () => {
     if (!editingEntry || !user || user.role !== 'admin') return;
 
@@ -878,33 +1164,60 @@ const Clock = () => {
 
       const dateString = format(entryDate, 'yyyy-MM-dd');
 
-      // Verify document exists before updating
-      const entryDoc = await getDoc(doc(db, 'timeEntries', editingEntry.id));
-      if (!entryDoc.exists()) {
-        toast({
-          title: 'Error',
-          description: 'Time entry not found. It may have been deleted.',
-          variant: 'destructive',
+      // Check if this is a new entry (no id or empty id)
+      const isNewEntry = !editingEntry.id || editingEntry.id === '';
+
+      if (isNewEntry) {
+        // Create new entry
+        const users = await getAllUsers();
+        const targetUser = users.find((u: any) => u.id === editingEntry.userId);
+        const userName = targetUser?.name || `${targetUser?.firstName || ''} ${targetUser?.lastName || ''}`.trim() || targetUser?.email || 'Unknown';
+        const userEmail = targetUser?.email || '';
+
+        await addDoc(collection(db, 'timeEntries'), {
+          userId: editingEntry.userId,
+          date: Timestamp.fromDate(entryDate),
+          dateString: dateString,
+          clockIn: Timestamp.fromDate(clockIn),
+          clockOut: clockOut ? Timestamp.fromDate(clockOut) : null,
+          totalHours: totalHours ? Math.round(totalHours * 100) / 100 : null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         });
-        setEditEntryOpen(false);
-        setEditingEntry(null);
-        await loadAllUsersEntries();
-        return;
+
+        toast({
+          title: 'Success',
+          description: 'Time entry created successfully',
+        });
+      } else {
+        // Update existing entry
+        const entryDoc = await getDoc(doc(db, 'timeEntries', editingEntry.id));
+        if (!entryDoc.exists()) {
+          toast({
+            title: 'Error',
+            description: 'Time entry not found. It may have been deleted.',
+            variant: 'destructive',
+          });
+          setEditEntryOpen(false);
+          setEditingEntry(null);
+          await loadAllUsersEntries();
+          return;
+        }
+
+        await updateDoc(doc(db, 'timeEntries', editingEntry.id), {
+          date: Timestamp.fromDate(entryDate),
+          dateString: dateString,
+          clockIn: Timestamp.fromDate(clockIn),
+          clockOut: clockOut ? Timestamp.fromDate(clockOut) : null,
+          totalHours: totalHours ? Math.round(totalHours * 100) / 100 : null,
+          updatedAt: serverTimestamp(),
+        });
+
+        toast({
+          title: 'Success',
+          description: 'Time entry updated successfully',
+        });
       }
-
-      await updateDoc(doc(db, 'timeEntries', editingEntry.id), {
-        date: Timestamp.fromDate(entryDate),
-        dateString: dateString,
-        clockIn: Timestamp.fromDate(clockIn),
-        clockOut: clockOut ? Timestamp.fromDate(clockOut) : null,
-        totalHours: totalHours ? Math.round(totalHours * 100) / 100 : null,
-        updatedAt: serverTimestamp(),
-      });
-
-      toast({
-        title: 'Success',
-        description: 'Time entry updated successfully',
-      });
 
       setEditEntryOpen(false);
       setEditingEntry(null);
@@ -913,10 +1226,36 @@ const Clock = () => {
       setEditClockOut('');
       await loadAllUsersEntries();
       await loadTimeEntries();
+      
+      // Refresh date range details if open
+      if (dateRangeDetailsOpen && selectedUserForRange && dateRange?.from && dateRange?.to) {
+        const fromDate = new Date(dateRange.from);
+        fromDate.setHours(0, 0, 0, 0);
+        const toDate = new Date(dateRange.to);
+        toDate.setHours(23, 59, 59, 999);
+        
+        // Reload all entries to get the new/updated entry
+        await loadAllUsersEntries();
+        
+        const userRangeEntries = allUsersEntries.filter(entry => {
+          const entryDate = new Date(entry.date);
+          entryDate.setHours(0, 0, 0, 0);
+          return entry.userId === selectedUserForRange.userId && entryDate >= fromDate && entryDate <= toDate;
+        });
+        
+        userRangeEntries.sort((a, b) => {
+          const dateCompare = a.date.getTime() - b.date.getTime();
+          if (dateCompare !== 0) return dateCompare;
+          if (!a.clockIn || !b.clockIn) return 0;
+          return a.clockIn.getTime() - b.clockIn.getTime();
+        });
+        
+        setSelectedUserRangeEntries(userRangeEntries);
+      }
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update entry',
+        description: error.message || 'Failed to save entry',
         variant: 'destructive',
       });
     } finally {
@@ -1509,6 +1848,7 @@ const Clock = () => {
           totalHours: entry.totalHours || 0,
           sessionCount: 1,
           isActive: !entry.clockOut,
+          breaks: entry.breaks || [],
           clockInLocation: entry.clockInLocation,
           clockInSystemLocation: entry.clockInSystemLocation,
         });
@@ -1533,6 +1873,14 @@ const Clock = () => {
         
         // Increment session count
         merged.sessionCount += 1;
+        
+        // Aggregate breaks from all entries
+        if (entry.breaks && entry.breaks.length > 0) {
+          if (!merged.breaks) {
+            merged.breaks = [];
+          }
+          merged.breaks.push(...entry.breaks);
+        }
         
         // Update active status (if any entry is active, the merged entry is active)
         if (!entry.clockOut) {
@@ -1576,6 +1924,11 @@ const Clock = () => {
           clockIn: data.clockIn?.toDate() || null,
           clockOut: data.clockOut?.toDate() || null,
           totalHours: data.totalHours || null,
+          breaks: data.breaks ? data.breaks.map(b => ({
+            startTime: b.startTime.toDate(),
+            endTime: b.endTime?.toDate() || null,
+            duration: b.duration || null,
+          })) : undefined,
           clockInLocation: data.clockInLocation ? {
             latitude: data.clockInLocation.latitude,
             longitude: data.clockInLocation.longitude,
@@ -1681,7 +2034,10 @@ const Clock = () => {
       const users = await getAllUsers();
       const userMap = new Map(users.map(u => [u.id, { name: u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email, email: u.email }]));
 
-      const active: ActiveUser[] = [];
+      // Use a Map to track the most recent active entry per user
+      // This prevents duplicate entries if a user has multiple active clock-ins
+      const activeMap = new Map<string, ActiveUser>();
+      
       querySnapshot.docs.forEach((doc) => {
         try {
           const data = getTimeEntryData(doc.data());
@@ -1689,13 +2045,19 @@ const Clock = () => {
           if (data.clockIn && !data.clockOut) {
             const userInfo = userMap.get(data.userId);
             if (userInfo) {
-              active.push({
-                userId: data.userId,
-                userName: userInfo.name,
-                userEmail: userInfo.email,
-                clockInTime: data.clockIn.toDate(),
-                entryId: doc.id,
-              });
+              const clockInTime = data.clockIn.toDate();
+              const existingEntry = activeMap.get(data.userId);
+              
+              // Only add if this is the first entry for this user, or if this entry is more recent
+              if (!existingEntry || clockInTime.getTime() > existingEntry.clockInTime.getTime()) {
+                activeMap.set(data.userId, {
+                  userId: data.userId,
+                  userName: userInfo.name,
+                  userEmail: userInfo.email,
+                  clockInTime: clockInTime,
+                  entryId: doc.id,
+                });
+              }
             }
           }
         } catch {
@@ -1703,7 +2065,8 @@ const Clock = () => {
         }
       });
 
-      // Sort by clock in time (most recent first)
+      // Convert map to array and sort by clock in time (most recent first)
+      const active = Array.from(activeMap.values());
       active.sort((a, b) => b.clockInTime.getTime() - a.clockInTime.getTime());
       setActiveUsers(active);
 
@@ -1917,41 +2280,65 @@ const Clock = () => {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle>Status</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className={`h-3 w-3 rounded-full ${isClockedIn ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
-              <span className="font-medium">
-                {isClockedIn ? 'Currently Clocked In' : 'Not Clocked In'}
-              </span>
-            </div>
-            {isClockedIn && currentEntry?.clockIn && (
-              <div className="text-sm text-muted-foreground">
-                Clocked in at: {formatTime(currentEntry.clockIn)}
+            {isClockedIn && currentEntry && (
+              <div className="flex items-center gap-2">
+                <Label htmlFor="break-toggle" className="text-sm text-muted-foreground cursor-pointer">
+                  <Coffee className="h-4 w-4 inline mr-1" />
+                  Break
+                </Label>
+                <Switch
+                  id="break-toggle"
+                  checked={isOnBreak}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      handleStartBreak();
+                    } else {
+                      handleEndBreak();
+                    }
+                  }}
+                />
               </div>
             )}
-            <div className="flex gap-2">
-              <Button 
-                onClick={handleClockIn} 
-                disabled={isClockedIn}
-                className="flex-1"
-              >
-                <LogIn className="h-4 w-4 mr-2" />
-                Clock In
-              </Button>
-              <Button 
-                onClick={handleClockOut} 
-                disabled={!isClockedIn || !currentEntry}
-                variant="outline"
-                className="flex-1"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Clock Out
-              </Button>
-            </div>
-          </CardContent>
+          </CardHeader>
+          <CardContent className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`h-3 w-3 rounded-full ${isClockedIn ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                <span className="font-medium">
+                  {isClockedIn ? 'Currently Clocked In' : 'Not Clocked In'}
+                </span>
+              </div>
+              {isClockedIn && currentEntry?.clockIn && (
+                <div className="text-sm text-muted-foreground">
+                  Clocked in at: {formatTime(currentEntry.clockIn)}
+                </div>
+              )}
+              {isOnBreak && currentBreakStart && (
+                <div className="text-sm text-muted-foreground">
+                  On break since: {formatTime(currentBreakStart)}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleClockIn} 
+                  disabled={isClockedIn}
+                  className="flex-1"
+                >
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Clock In
+                </Button>
+                <Button 
+                  onClick={handleClockOut} 
+                  disabled={!isClockedIn || !currentEntry}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Clock Out
+                </Button>
+              </div>
+            </CardContent>
         </Card>
       </div>
 
@@ -3440,11 +3827,15 @@ const Clock = () => {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Edit Time Entry
+              {editingEntry && editingEntry.id ? 'Edit Time Entry' : 'Add Time Entry'}
               {editingSessionNumber && ` - Session ${editingSessionNumber}`}
             </DialogTitle>
             <DialogDescription>
-              {editingEntry && `Edit clock in/out times for ${editingEntry.userName || 'user'}`}
+              {editingEntry && editingEntry.id 
+                ? `Edit clock in/out times for ${editingEntry.userName || 'user'}`
+                : editingEntry 
+                  ? `Add clock in/out times for user`
+                  : 'Add or edit time entry'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -3498,10 +3889,10 @@ const Clock = () => {
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Saving...
+                    {editingEntry && editingEntry.id ? 'Saving...' : 'Creating...'}
                   </>
                 ) : (
-                  'Save Changes'
+                  editingEntry && editingEntry.id ? 'Save Changes' : 'Create Entry'
                 )}
               </Button>
               <Button
@@ -3765,6 +4156,25 @@ const Clock = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* User Date Range Details Dialog */}
+      {selectedUserForRange && (
+        <UserDateRangeDetailsDialog
+          open={dateRangeDetailsOpen}
+          onOpenChange={setDateRangeDetailsOpen}
+          userEntries={selectedUserRangeEntries}
+          userInfo={selectedUserForRange}
+          dateRange={dateRange}
+          leaveDays={selectedUserLeaveDays}
+          isAdmin={isAdmin}
+          onEditEntry={handleEditEntry}
+          onDeleteEntry={(entry) => {
+            setSessionToDelete(entry);
+            setDeleteDialogOpen(true);
+            setDateRangeDetailsOpen(false);
+          }}
+        />
+      )}
 
       {/* Delete Session Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

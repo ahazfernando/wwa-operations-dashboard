@@ -1,6 +1,7 @@
 "use client";
 
 import { useDroppable } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TaskStatus } from '@/types/task';
@@ -15,6 +16,7 @@ interface DroppableColumnProps {
   taskCount: number;
   children: ReactNode;
   isOver?: boolean;
+  taskIds?: string[]; // Array of task IDs for SortableContext
 }
 
 export function DroppableColumn({
@@ -25,6 +27,7 @@ export function DroppableColumn({
   taskCount,
   children,
   isOver,
+  taskIds = [],
 }: DroppableColumnProps) {
   const { setNodeRef, isOver: isOverColumn } = useDroppable({
     id,
@@ -56,21 +59,23 @@ export function DroppableColumn({
         </div>
       </CardHeader>
       <CardContent className="flex-1 p-4">
-        <ScrollArea className="h-[calc(100vh-300px)]">
+        <ScrollArea className="h-[calc(100vh-90px)]">
           <div className="pr-4">
             {taskCount === 0 && !isActive ? (
               <div className="text-center text-muted-foreground py-8">
                 <p className="text-sm">No tasks in this column</p>
               </div>
             ) : (
-              <div className={cn("space-y-2", isActive && "min-h-[100px]")}>
-                {children}
-                {isActive && taskCount === 0 && (
-                  <div className="text-center text-muted-foreground py-8 border-2 border-dashed border-primary rounded-lg">
-                    <p className="text-sm">Drop task here</p>
-                  </div>
-                )}
-              </div>
+              <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+                <div className={cn("space-y-2", isActive && "min-h-[100px]")}>
+                  {children}
+                  {isActive && taskCount === 0 && (
+                    <div className="text-center text-muted-foreground py-8 border-2 border-dashed border-primary rounded-lg">
+                      <p className="text-sm">Drop task here</p>
+                    </div>
+                  )}
+                </div>
+              </SortableContext>
             )}
           </div>
         </ScrollArea>
