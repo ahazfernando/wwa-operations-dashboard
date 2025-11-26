@@ -9,6 +9,7 @@ import {
     doc,
     updateDoc,
     getDoc,
+    where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
@@ -96,7 +97,16 @@ interface RawSlot {
     weekStart: string;
 }
 
-type IntentType = "requesting" | "remove" | "pending" | "approved";
+interface LeaveRequest {
+    id: string;
+    type: "day" | "slot";
+    fromDate: { toDate(): Date };
+    toDate: { toDate(): Date };
+    status: "pending" | "approved" | "rejected";
+    slotIndex?: number;
+}
+
+type IntentType = "requesting" | "remove" | "pending" | "approved" | "on-leave";
 
 interface Block {
     blockId: string;
@@ -108,6 +118,7 @@ interface Block {
     timeLabel: string;
     intent: IntentType;
     docId: string;
+    isLeave?: boolean;
 }
 
 interface ModalSlot {
@@ -130,6 +141,7 @@ export default function AvailabilityRequests() {
 
     const [users, setUsers] = useState<User[]>([]);
     const [allSlots, setAllSlots] = useState<RawSlot[]>([]);
+    const [leaveRequests, setLeaveRequests] = useState<Map<string, LeaveRequest[]>>(new Map());
     const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [filterUser, setFilterUser] = useState("all");
     const [filterIntent, setFilterIntent] = useState("all");
@@ -142,6 +154,7 @@ export default function AvailabilityRequests() {
 
     const weekKey = format(currentWeek, "yyyy-MM-dd");
 
+    // Load all users
     useEffect(() => {
         const unsub = onSnapshot(collection(db, "users"), (snap) => {
             const list: User[] = [{ uid: "all", displayName: "All Users" }];
@@ -161,6 +174,7 @@ export default function AvailabilityRequests() {
         return unsub;
     }, []);
 
+    // Load all weekly availability
     useEffect(() => {
         const q = query(collection(db, "weeklyAvailability"));
         const unsub = onSnapshot(q, (snapshot) => {
@@ -198,64 +212,183 @@ export default function AvailabilityRequests() {
         return unsub;
     }, [users]);
 
-    // Helper to safely map status → intent
-    const getIntent = (status: RawSlot["status"]): IntentType => {
+    // Load approved leave requests for the current week
+    useEffect(() => {
+        const start = currentWeek;
+        const end = addWeeks(start, 1);
+
+        const q = query(
+            collection(db, "leaveRequests"),
+            where("status", "==", "approved")
+        );
+
+        const unsub = onSnapshot(q, (snap) => {
+            const map = new Map<string, LeaveRequest[]>();
+
+            snap.forEach((docSnap) => {
+                const data = docSnap.data();
+                const from = data.fromDate.toDate();
+                const to = data.toDate.toDate();
+
+                if (from > end || to < start) return;
+
+                const uid = data.uid as string;
+                if (!map.has(uid)) map.set(uid, []);
+                map.get(uid)!.push({
+                    id: docSnap.id,
+                    type: data.type,
+                    fromDate: data.fromDate,
+                    toDate: data.toDate,
+                    status: "approved",
+                    slotIndex: data.slotIndex,
+                });
+            });
+
+            setLeaveRequests(map);
+        });
+
+        return unsub;
+    }, [currentWeek]);
+
+    const getIntent = (status: RawSlot["status"] | "on-leave"): IntentType => {
+        if (status === "on-leave") return "on-leave";
         switch (status) {
-            case "request-add":
-                return "requesting";
-            case "request-remove":
-                return "remove";
-            case "pending":
-                return "pending";
-            case "approved":
-                return "approved";
-            default:
-                return "pending"; // fallback
+            case "request-add": return "requesting";
+            case "request-remove": return "remove";
+            case "pending": return "pending";
+            case "approved": return "approved";
+            default: return "pending";
         }
     };
 
     const getIntentLabel = (intent: IntentType): string => {
-        return intent.charAt(0).toUpperCase() + intent.slice(1);
+        const map: Record<IntentType, string> = {
+            requesting: "Requesting",
+            remove: "Remove",
+            pending: "Pending",
+            approved: "Approved",
+            "on-leave": "On Leave",
+        };
+        return map[intent];
     };
 
     const getIntentColor = (intent: IntentType): string => {
-        switch (intent) {
-            case "requesting":
-                return "bg-yellow-100 text-yellow-800";
-            case "remove":
-                return "bg-red-100 text-red-800";
-            case "pending":
-                return "bg-blue-100 text-blue-800";
-            case "approved":
-                return "bg-green-100 text-green-800";
-            default:
-                return "bg-gray-100 text-gray-800";
-        }
+        const map: Record<IntentType, string> = {
+            requesting: "bg-yellow-100 hover:bg-yellow-100 text-yellow-800",
+            remove: "bg-red- hover:bg-red-100 text-red-800",
+            pending: "bg-blue-100 hover:bg-blue-100 text-blue-800",
+            approved: "bg-green-100 hover:bg-green-100 text-green-800",
+            "on-leave": "bg-purple-100 hover:bg-purple-100 text-purple-800",
+        };
+        return map[intent];
+    };
+
+    const isOnLeave = (uid: string, date: string, timeIndex: number): boolean => {
+        const leaves = leaveRequests.get(uid) || [];
+        const dateStr = date;
+
+        const fullDayLeave = leaves.some(
+            (l) =>
+                l.type === "day" &&
+                format(l.fromDate.toDate(), "yyyy-MM-dd") <= dateStr &&
+                format(l.toDate.toDate(), "yyyy-MM-dd") >= dateStr
+        );
+
+        if (fullDayLeave) return true;
+
+        return leaves.some(
+            (l) =>
+                l.type === "slot" &&
+                format(l.fromDate.toDate(), "yyyy-MM-dd") === dateStr &&
+                l.slotIndex === timeIndex
+        );
     };
 
     const blocks = useMemo(() => {
         let filtered = allSlots.filter((s) => s.weekStart === weekKey);
 
         if (filterUser !== "all") filtered = filtered.filter((s) => s.uid === filterUser);
-        if (filterIntent !== "all") {
-            const targetIntent = filterIntent as IntentType;
-            filtered = filtered.filter((s) => getIntent(s.status) === targetIntent);
-        }
         if (selectedDate) {
             const d = format(selectedDate, "yyyy-MM-dd");
             filtered = filtered.filter((s) => s.date === d);
         }
 
-        const map = new Map<string, RawSlot[]>();
+        // Add "on-leave" virtual blocks
+        const leaveBlocks: Block[] = [];
+        if (filterIntent === "all" || filterIntent === "on-leave") {
+            const seen = new Set<string>();
+            allSlots.forEach((s) => seen.add(`${s.uid}-${s.date}`));
+
+            leaveRequests.forEach((leaves, uid) => {
+                if (filterUser !== "all" && filterUser !== uid) return;
+
+                const userName = users.find((u) => u.uid === uid)?.displayName || "Unknown";
+
+                leaves.forEach((leave) => {
+                    const from = format(leave.fromDate.toDate(), "yyyy-MM-dd");
+                    const to = format(leave.toDate.toDate(), "yyyy-MM-dd");
+
+                    for (
+                        let d = new Date(from);
+                        d <= new Date(to);
+                        d.setDate(d.getDate() + 1)
+                    ) {
+                        const dateStr = format(d, "yyyy-MM-dd");
+                        if (dateStr < format(currentWeek, "yyyy-MM-dd") || dateStr >= format(addWeeks(currentWeek, 1), "yyyy-MM-dd")) continue;
+
+                        if (leave.type === "day") {
+                            const key = `${uid}-${dateStr}-leave-full`;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                leaveBlocks.push({
+                                    blockId: `leave-${leave.id}-${dateStr}`,
+                                    uid,
+                                    userName,
+                                    date: dateStr,
+                                    dateFormatted: format(parseISO(dateStr), "EEE, MMM dd"),
+                                    timeIndices: Array.from({ length: 20 }, (_, i) => i),
+                                    timeLabel: "All Day",
+                                    intent: "on-leave",
+                                    docId: "",
+                                    isLeave: true,
+                                });
+                            }
+                        } else if (leave.type === "slot" && leave.slotIndex != null) {
+                            const tIdx = leave.slotIndex;
+                            const key = `${uid}-${dateStr}-${tIdx}`;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                leaveBlocks.push({
+                                    blockId: `leave-${leave.id}-${dateStr}-${tIdx}`,
+                                    uid,
+                                    userName,
+                                    date: dateStr,
+                                    dateFormatted: format(parseISO(dateStr), "EEE, MMM dd"),
+                                    timeIndices: [tIdx],
+                                    timeLabel: timeSlots[tIdx],
+                                    intent: "on-leave",
+                                    docId: "",
+                                    isLeave: true,
+                                });
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        // Process regular slots
+        const slotMap = new Map<string, RawSlot[]>();
         filtered.forEach((s) => {
             const intent = getIntent(s.status);
+            if (filterIntent !== "all" && intent !== filterIntent) return;
             const key = `${s.uid}-${s.date}-${intent}`;
-            if (!map.has(key)) map.set(key, []);
-            map.get(key)!.push(s);
+            if (!slotMap.has(key)) slotMap.set(key, []);
+            slotMap.get(key)!.push(s);
         });
 
-        const result: Block[] = [];
-        map.forEach((items) => {
+        const slotBlocks: Block[] = [];
+        slotMap.forEach((items) => {
             const sorted = items.sort((a, b) => a.timeIndex - b.timeIndex);
             let current: number[] = [sorted[0].timeIndex];
 
@@ -263,7 +396,7 @@ export default function AvailabilityRequests() {
                 if (sorted[i].timeIndex === sorted[i - 1].timeIndex + 1) {
                     current.push(sorted[i].timeIndex);
                 } else {
-                    result.push({
+                    slotBlocks.push({
                         blockId: `${items[0].docId}-${items[0].date}-${current.join(",")}`,
                         uid: items[0].uid,
                         userName: items[0].userName,
@@ -277,7 +410,7 @@ export default function AvailabilityRequests() {
                     current = [sorted[i].timeIndex];
                 }
             }
-            result.push({
+            slotBlocks.push({
                 blockId: `${items[0].docId}-${items[0].date}-${current.join(",")}`,
                 uid: items[0].uid,
                 userName: items[0].userName,
@@ -290,12 +423,16 @@ export default function AvailabilityRequests() {
             });
         });
 
-        return result.sort((a, b) => {
+        const allBlocks = [...slotBlocks, ...leaveBlocks];
+
+        return allBlocks.sort((a, b) => {
             if (a.userName !== b.userName) return a.userName.localeCompare(b.userName);
             if (a.date !== b.date) return a.date.localeCompare(b.date);
+            if (a.intent === "on-leave") return -1;
+            if (b.intent === "on-leave") return 1;
             return a.timeIndices[0] - b.timeIndices[0];
         });
-    }, [allSlots, weekKey, filterUser, filterIntent, selectedDate]);
+    }, [allSlots, leaveRequests, weekKey, filterUser, filterIntent, selectedDate, users, currentWeek]);
 
     const groupedModalSlots = useMemo((): GroupedModalSlot[] => {
         if (!selectedEmployee) return [];
@@ -304,18 +441,11 @@ export default function AvailabilityRequests() {
             (s) => s.uid === selectedEmployee.uid && s.weekStart === weekKey
         );
 
-        const map = new Map<string, GroupedModalSlot>();
+        const map = new Map<string, ModalSlot[]>();
         filtered.forEach((s) => {
             const intent = getIntent(s.status);
-
-            if (!map.has(s.date)) {
-                map.set(s.date, {
-                    date: s.date,
-                    dateFormatted: format(parseISO(s.date), "EEE, MMM dd"),
-                    slots: [],
-                });
-            }
-            map.get(s.date)!.slots.push({
+            if (!map.has(s.date)) map.set(s.date, []);
+            map.get(s.date)!.push({
                 id: s.id,
                 timeIndex: s.timeIndex,
                 timeLabel: timeSlots[s.timeIndex],
@@ -325,10 +455,16 @@ export default function AvailabilityRequests() {
             });
         });
 
-        return Array.from(map.values()).map((group) => ({
-            ...group,
-            slots: group.slots.sort((a, b) => a.timeIndex - b.timeIndex),
-        }));
+        // Sort dates chronologically
+        const sorted = Array.from(map.entries())
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([date, slots]) => ({
+                date,
+                dateFormatted: format(parseISO(date), "EEE, MMM dd"),
+                slots: slots.sort((a, b) => a.timeIndex - b.timeIndex),
+            }));
+
+        return sorted;
     }, [selectedEmployee, allSlots, weekKey]);
 
     const openEmployeeModal = (uid: string, name: string) => {
@@ -437,7 +573,7 @@ export default function AvailabilityRequests() {
                 <CardHeader>
                     <CardTitle>Availability Requests</CardTitle>
                     <CardDescription>
-                        Click employee name to review and approve individual time slots
+                        Click employee name to review and approve individual time slots. On Leave slots are shown in purple.
                     </CardDescription>
                 </CardHeader>
 
@@ -479,6 +615,7 @@ export default function AvailabilityRequests() {
                                 <SelectItem value="remove">Requesting Remove</SelectItem>
                                 <SelectItem value="pending">Pending</SelectItem>
                                 <SelectItem value="approved">Approved</SelectItem>
+                                <SelectItem value="on-leave">On Leave</SelectItem>
                             </SelectContent>
                         </Select>
 
@@ -509,7 +646,7 @@ export default function AvailabilityRequests() {
                                 {blocks.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
-                                            No availability requests match your filters
+                                            No availability or leave requests match your filters
                                         </TableCell>
                                     </TableRow>
                                 ) : (
@@ -564,8 +701,9 @@ export default function AvailabilityRequests() {
                 </CardContent>
             </Card>
 
+            {/* Modal remains unchanged — leave slots are not editable here */}
             <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-                <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+                <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Review Availability - {selectedEmployee?.name}</DialogTitle>
                     </DialogHeader>
@@ -618,7 +756,7 @@ export default function AvailabilityRequests() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {groupedModalSlots.map((group) =>
+                                    {groupedModalSlots.map((group => (
                                         group.slots.map((slot, idx) => {
                                             const isFirst = idx === 0;
                                             const rowSpan = group.slots.length;
@@ -670,7 +808,7 @@ export default function AvailabilityRequests() {
                                                 </TableRow>
                                             );
                                         })
-                                    )}
+                                    )))}
                                 </TableBody>
                             </Table>
                         </div>
