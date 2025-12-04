@@ -736,6 +736,68 @@ const Clock = () => {
 
     try {
       const now = new Date();
+      const clockInTime = currentEntry.clockIn;
+      
+      if (!clockInTime) {
+        toast({
+          title: 'Error',
+          description: 'No clock in time found',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Check location for clock out if user has approved work-from-home location
+      if (db) {
+        try {
+          const workFromHomeDoc = await getDoc(doc(db, 'workFromHomeLocations', user.id));
+          if (workFromHomeDoc.exists()) {
+            const workFromHomeData = workFromHomeDoc.data();
+            if (workFromHomeData.status === 'approved' && 
+                workFromHomeData.latitude && 
+                workFromHomeData.longitude) {
+              // Get current location
+              const { employeeLocation } = await getAllLocationData();
+              if (employeeLocation.latitude && employeeLocation.longitude) {
+                // Check if user is within 50m radius
+                const withinRadius = isWithinRadius(
+                  employeeLocation.latitude,
+                  employeeLocation.longitude,
+                  workFromHomeData.latitude,
+                  workFromHomeData.longitude,
+                  50 // 50 meters
+                );
+
+                if (!withinRadius) {
+                  toast({
+                    title: 'Location Not Allowed',
+                    description: 'You must be within 50 meters of your approved work from home location to take a break. Please move closer to your approved location.',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+              }
+            }
+          }
+        } catch (locationCheckError) {
+          // If we can't check the work-from-home location, allow break but log the error
+          console.error('Failed to check work-from-home location:', locationCheckError);
+        }
+      }
+
+      // Verify document exists before updating
+      const entryDoc = await getDoc(doc(db, 'timeEntries', currentEntry.id));
+      if (!entryDoc.exists()) {
+        toast({
+          title: 'Error',
+          description: 'Time entry not found. Please refresh and try again.',
+          variant: 'destructive',
+        });
+        // Refresh the current status
+        await checkCurrentStatus();
+        return;
+      }
+
       const existingBreaks = currentEntry.breaks || [];
       
       // Convert existing breaks to Firestore format
@@ -754,20 +816,29 @@ const Clock = () => {
       
       breaks.push(newBreak);
 
+      // Calculate total hours worked before break
+      const totalHours = (now.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
+
+      // Clock out the user and record the break
       await updateDoc(doc(db, 'timeEntries', currentEntry.id), {
+        clockOut: Timestamp.fromDate(now),
+        totalHours: Math.round(totalHours * 100) / 100,
         breaks: breaks,
         updatedAt: serverTimestamp(),
       });
 
-      setIsOnBreak(true);
-      setCurrentBreakStart(now);
+      setIsClockedIn(false);
+      setCurrentEntry(null);
+      setIsOnBreak(false);
+      setCurrentBreakStart(null);
       
       toast({
-        title: 'Break Started',
-        description: `Break started at ${format(now, 'h:mm a')}`,
+        title: 'Break Started - Clocked Out',
+        description: `You have been clocked out for break at ${format(now, 'h:mm a')}. Total hours: ${Math.round(totalHours * 100) / 100}h`,
       });
 
       await checkCurrentStatus();
+      await loadTimeEntries();
     } catch (error: any) {
       toast({
         title: 'Error',
