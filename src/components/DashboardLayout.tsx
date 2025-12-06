@@ -73,14 +73,14 @@ function AppSidebar() {
         <div className="p-4 border-b border-sidebar-border">
           {!isCollapsed && (
             <img 
-              src="/logos/WWA - White (1).png" 
+              src="/logos/OutbacksOfficialLogo.png" 
               alt="We Will AU" 
               className="h-8 w-auto object-contain"
             />
           )}
           {isCollapsed && (
             <img 
-              src="/logos/WWA - White (1).png" 
+              src="/logos/outback logo white-01.png" 
               alt="We Will AU" 
               className="h-8 w-auto object-contain mx-auto"
             />

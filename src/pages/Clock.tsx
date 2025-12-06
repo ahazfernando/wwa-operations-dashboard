@@ -661,27 +661,31 @@ const Clock = () => {
             if (workFromHomeData.status === 'approved' && 
                 workFromHomeData.latitude && 
                 workFromHomeData.longitude) {
-              // Get current location
-              const { employeeLocation } = await getAllLocationData();
-              if (employeeLocation.latitude && employeeLocation.longitude) {
-                // Check if user is within 50m radius
-                const withinRadius = isWithinRadius(
-                  employeeLocation.latitude,
-                  employeeLocation.longitude,
-                  workFromHomeData.latitude,
-                  workFromHomeData.longitude,
-                  50 // 50 meters
-                );
+              // Only check location restriction if user doesn't have permission to work from anywhere
+              if (!workFromHomeData.allowWorkFromAnywhere) {
+                // Get current location
+                const { employeeLocation } = await getAllLocationData();
+                if (employeeLocation.latitude && employeeLocation.longitude) {
+                  // Check if user is within 50m radius
+                  const withinRadius = isWithinRadius(
+                    employeeLocation.latitude,
+                    employeeLocation.longitude,
+                    workFromHomeData.latitude,
+                    workFromHomeData.longitude,
+                    50 // 50 meters
+                  );
 
-                if (!withinRadius) {
-                  toast({
-                    title: 'Location Not Allowed',
-                    description: 'You must be within 50 meters of your approved work from home location to clock out. Please move closer to your approved location.',
-                    variant: 'destructive',
-                  });
-                  return;
+                  if (!withinRadius) {
+                    toast({
+                      title: 'Location Not Allowed',
+                      description: 'You must be within 50 meters of your approved work from home location to clock out. Please move closer to your approved location.',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
                 }
               }
+              // If allowWorkFromAnywhere is true, skip location check and allow clock-out
             }
           }
         } catch (locationCheckError) {
