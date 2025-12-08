@@ -33,7 +33,8 @@ import {
   History,
   CheckCircle,
   Bell,
-  MapPin
+  MapPin,
+  Briefcase
 } from 'lucide-react';
 
 const menuItems = [
@@ -43,6 +44,7 @@ const menuItems = [
   { title: 'Work From Home Location', url: '/work-from-home', icon: MapPin, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Employee Ratings', url: '/ratings', icon: Star, roles: ['admin', 'operationsstaff'] },
   { title: 'Lead Tracking', url: '/leads', icon: Users, roles: ['admin', 'operationsstaff', 'itteam'] },
+  { title: 'Recruitment Leads', url: '/recruitment-leads', icon: Briefcase, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Tasks', url: '/tasks', icon: CheckSquare, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Reminders', url: '/reminders', icon: Bell, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Availability', url: '/availability', icon: CheckCircle, roles: ['admin', 'operationsstaff', 'itteam'] },
@@ -69,7 +71,7 @@ function AppSidebar() {
 
   return (
     <Sidebar className={isCollapsed ? 'w-14' : 'w-64'}>
-      <SidebarContent>
+      <SidebarContent className="[&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <div className="p-4 border-b border-sidebar-border">
           {!isCollapsed && (
             <img 

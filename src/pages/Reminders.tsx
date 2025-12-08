@@ -13,15 +13,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Calendar, Trash2, Edit, Bell, CheckCircle2, Circle, AlertCircle, Image as ImageIcon, Upload, X, Loader2, Search, ChevronDown, Users } from 'lucide-react';
+import { Plus, Calendar, Trash2, Edit, Bell, CheckCircle2, Circle, AlertCircle, Image as ImageIcon, Upload, X, Loader2, Search, ChevronDown, Users, BellRing, Clock, Sparkles, TrendingUp, Filter, MoreVertical } from 'lucide-react';
 import { Reminder } from '@/types/reminder';
 import { createReminder, getRemindersByUser, updateReminder, deleteReminder } from '@/lib/reminders';
+import { Notification } from '@/types/notification';
+import { getNotificationsByUser, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from '@/lib/notifications';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
-import { format, isPast, isToday, isTomorrow } from 'date-fns';
+import { format, isPast, isToday, isTomorrow, differenceInDays } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 interface User {
   id: string;
@@ -32,7 +36,10 @@ interface User {
 const Reminders = () => {
   const { user, getAllUsers } = useAuth();
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'reminders' | 'notifications'>('reminders');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -55,6 +62,7 @@ const Reminders = () => {
   useEffect(() => {
     if (user) {
       loadReminders();
+      loadNotifications();
       loadUsers();
     }
   }, [user]);
@@ -91,6 +99,73 @@ const Reminders = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadNotifications = async () => {
+    if (!user) return;
+    
+    try {
+      setNotificationsLoading(true);
+      const userNotifications = await getNotificationsByUser(user.id);
+      setNotifications(userNotifications);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load notifications',
+        variant: 'destructive',
+      });
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      await markNotificationAsRead(notificationId);
+      await loadNotifications();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to mark notification as read',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user) return;
+    
+    try {
+      await markAllNotificationsAsRead(user.id);
+      await loadNotifications();
+      toast({
+        title: 'Success',
+        description: 'All notifications marked as read',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to mark all notifications as read',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId: string) => {
+    try {
+      await deleteNotification(notificationId);
+      await loadNotifications();
+      toast({
+        title: 'Success',
+        description: 'Notification deleted',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete notification',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -422,21 +497,28 @@ const Reminders = () => {
     };
   }, [reminders]);
 
-  if (loading) {
+  if (loading && activeTab === 'reminders') {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <Skeleton className="h-9 w-32" />
-            <Skeleton className="h-5 w-64" />
-          </div>
+      <div className="space-y-8">
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-6 w-96" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="p-6">
+              <Skeleton className="h-16 w-16 rounded-full mb-4" />
+              <Skeleton className="h-6 w-24 mb-2" />
+              <Skeleton className="h-4 w-32" />
+            </Card>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i}>
+            <Card key={i} className="overflow-hidden">
               <CardHeader>
                 <Skeleton className="h-6 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-4 w-1/2 mt-2" />
               </CardHeader>
               <CardContent>
                 <Skeleton className="h-20 w-full" />
@@ -448,22 +530,45 @@ const Reminders = () => {
     );
   }
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+  const readNotifications = notifications.filter(n => n.read);
+  const unreadNotifications = notifications.filter(n => !n.read);
+
+  // Calculate stats
+  const totalReminders = reminders.length;
+  const completedCount = completedReminders.length;
+  const overdueCount = overdueReminders.length;
+  const upcomingCount = upcomingReminders.length;
+  const completionRate = totalReminders > 0 ? Math.round((completedCount / totalReminders) * 100) : 0;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Reminders</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your personal reminders and tasks
-          </p>
-        </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => handleOpenDialog()}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Reminder
-            </Button>
-          </DialogTrigger>
+    <div className="space-y-8">
+      {/* Hero Section with Stats */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-background border border-primary/20 p-8">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -mr-32 -mt-32" />
+        <div className="relative z-10">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
+                  <BellRing className="h-6 w-6 text-primary" />
+                </div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                  Reminders & Notifications
+                </h1>
+              </div>
+              <p className="text-muted-foreground text-lg ml-[60px]">
+                Stay organized and never miss important tasks or updates
+              </p>
+            </div>
+            {activeTab === 'reminders' && (
+              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button onClick={() => handleOpenDialog()} size="lg" className="shadow-lg hover:shadow-xl transition-shadow">
+                    <Plus className="h-5 w-5 mr-2" />
+                    Create Reminder
+                  </Button>
+                </DialogTrigger>
           <DialogContent 
             className="max-w-5xl max-h-[90vh] overflow-hidden p-0 !grid-cols-1 gap-0 !bg-transparent"
             style={{ backgroundColor: 'transparent' }}
@@ -749,280 +854,475 @@ const Reminders = () => {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Overdue Reminders */}
-      {overdueReminders.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-red-500" />
-            <h2 className="text-xl font-semibold">Overdue</h2>
-            <Badge variant="destructive">{overdueReminders.length}</Badge>
+        )}
+            {activeTab === 'notifications' && unreadCount > 0 && (
+              <Button variant="outline" onClick={handleMarkAllAsRead} size="lg" className="shadow-lg">
+                <CheckCircle2 className="h-5 w-5 mr-2" />
+                Mark All as Read
+              </Button>
+            )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {overdueReminders.map((reminder) => (
-              <Card key={reminder.id} className="border-red-200 dark:border-red-800">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Bell className="h-4 w-4 text-red-500" />
-                        {reminder.title}
-                      </CardTitle>
-                      <CardDescription className="mt-1">
-                        {getDueDateLabel(reminder.dueDate)}
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className={getPriorityColor(reminder.priority || 'medium')}>
-                        {getPriorityLabel(reminder.priority || 'medium')}
-                      </Badge>
+
+          {activeTab === 'notifications' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-background hover:shadow-lg transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-primary/10">
+                      <BellRing className="h-6 w-6 text-primary" />
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  {reminder.description && (
-                    <p className="text-sm text-muted-foreground mb-4">
-                      {reminder.description}
-                    </p>
-                  )}
-                  {reminder.images && reminder.images.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2 mb-4">
-                      {reminder.images.map((imageUrl, index) => (
-                        <div key={index} className="relative group">
-                          <img
-                            src={imageUrl}
-                            alt={`Reminder image ${index + 1}`}
-                            className="w-full h-24 object-cover rounded"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
-                    <div className="mb-4">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                        <Users className="h-4 w-4" />
-                        <span>Assigned to:</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0 ? (
-                          reminder.assignedMemberNames.map((name, index) => (
-                            <Badge key={index} variant="secondary" className="text-xs">
-                              {name}
-                            </Badge>
-                          ))
-                        ) : (
-                          <Badge variant="secondary" className="text-xs">
-                            {reminder.assignedMembers.length} member{reminder.assignedMembers.length !== 1 ? 's' : ''}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleToggleComplete(reminder)}
-                    >
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      Mark Complete
-                    </Button>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenDialog(reminder)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteClick(reminder)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
+                  <div className="space-y-1">
+                    <p className="text-3xl font-bold text-primary">{unreadCount}</p>
+                    <p className="text-sm font-medium text-muted-foreground">Unread Notifications</p>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+
+              <Card className="border-2 border-green-200 dark:border-green-800/50 bg-gradient-to-br from-green-50/50 to-background dark:from-green-950/20 dark:to-background hover:shadow-lg transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-green-100 dark:bg-green-900/30">
+                      <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">{readNotifications.length}</p>
+                    <p className="text-sm font-medium text-muted-foreground">Read Notifications</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-blue-200 dark:border-blue-800/50 bg-gradient-to-br from-blue-50/50 to-background dark:from-blue-950/20 dark:to-background hover:shadow-lg transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-900/30">
+                      <Bell className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{notifications.length}</p>
+                    <p className="text-sm font-medium text-muted-foreground">Total Notifications</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs Section */}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'reminders' | 'notifications')} className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-2 h-12 bg-muted/50 p-1 rounded-xl">
+          <TabsTrigger 
+            value="reminders" 
+            className="flex items-center gap-2 data-[state=active]:bg-background data-[state=active]:shadow-md transition-all duration-200 rounded-lg"
+          >
+            <Bell className="h-4 w-4" />
+            <span className="font-medium">Reminders</span>
+            {totalReminders > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">
+                {totalReminders}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger 
+            value="notifications" 
+            className="flex items-center gap-2 data-[state=active]:bg-background data-[state=active]:shadow-md transition-all duration-200 rounded-lg"
+          >
+            <BellRing className="h-4 w-4" />
+            <span className="font-medium">Notifications</span>
+            {unreadCount > 0 && (
+              <Badge variant="destructive" className="ml-1 text-xs animate-pulse">
+                {unreadCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="reminders" className="space-y-8 mt-8">
+      {/* Overdue Reminders */}
+      {overdueReminders.length > 0 && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
+              <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Overdue Reminders</h2>
+              <p className="text-sm text-muted-foreground">These reminders need immediate attention</p>
+            </div>
+            <Badge variant="destructive" className="ml-auto text-sm px-3 py-1">{overdueReminders.length}</Badge>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {overdueReminders.map((reminder) => {
+              const daysOverdue = differenceInDays(new Date(), reminder.dueDate);
+              return (
+                <Card 
+                  key={reminder.id} 
+                  className="group relative overflow-hidden border-2 border-red-200 dark:border-red-800/50 bg-gradient-to-br from-red-50/30 via-card to-card dark:from-red-950/10 hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
+                >
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-500 via-red-400 to-red-300" />
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-lg font-bold flex items-center gap-2 mb-2">
+                          <div className="p-1.5 rounded-lg bg-red-100 dark:bg-red-900/30 flex-shrink-0">
+                            <Bell className="h-4 w-4 text-red-600 dark:text-red-400" />
+                          </div>
+                          <span className="truncate">{reminder.title}</span>
+                        </CardTitle>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span className="font-medium text-red-600 dark:text-red-400">
+                            {daysOverdue} day{daysOverdue !== 1 ? 's' : ''} overdue
+                          </span>
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleOpenDialog(reminder)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleToggleComplete(reminder)}>
+                            <CheckCircle2 className="h-4 w-4 mr-2" />
+                            Mark Complete
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => handleDeleteClick(reminder)}
+                            className="text-red-600 dark:text-red-400"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="flex items-center gap-2 ml-7 mt-2">
+                      <Badge 
+                        className={cn(
+                          "text-xs font-semibold",
+                          reminder.priority === 'high' && "bg-red-500 text-white",
+                          reminder.priority === 'medium' && "bg-yellow-500 text-white",
+                          reminder.priority === 'low' && "bg-blue-500 text-white"
+                        )}
+                      >
+                        {getPriorityLabel(reminder.priority || 'medium')}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {reminder.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2 ml-7">
+                        {reminder.description}
+                      </p>
+                    )}
+                    {reminder.images && reminder.images.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 ml-7">
+                        {reminder.images.map((imageUrl, index) => (
+                          <div key={index} className="relative group/image overflow-hidden rounded-lg">
+                            <img
+                              src={imageUrl}
+                              alt={`Reminder image ${index + 1}`}
+                              className="w-full h-24 object-cover transition-transform duration-300 group-hover/image:scale-110"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
+                      <div className="ml-7">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                          <Users className="h-3.5 w-3.5" />
+                          <span>Assigned to:</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0 ? (
+                            reminder.assignedMemberNames.map((name, index) => (
+                              <Badge key={index} variant="secondary" className="text-xs">
+                                {name}
+                              </Badge>
+                            ))
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              {reminder.assignedMembers.length} member{reminder.assignedMembers.length !== 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 pt-2 border-t ml-7">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleToggleComplete(reminder)}
+                        className="flex-1"
+                      >
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Complete
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Upcoming Reminders */}
       {upcomingReminders.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-blue-500" />
-            <h2 className="text-xl font-semibold">Upcoming</h2>
-            <Badge>{upcomingReminders.length}</Badge>
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+              <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Upcoming Reminders</h2>
+              <p className="text-sm text-muted-foreground">Your scheduled tasks and reminders</p>
+            </div>
+            <Badge variant="default" className="ml-auto text-sm px-3 py-1">{upcomingReminders.length}</Badge>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {upcomingReminders.map((reminder) => (
-              <Card key={reminder.id}>
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Bell className="h-4 w-4" />
-                        {reminder.title}
-                      </CardTitle>
-                      <CardDescription className="mt-1">
-                        {getDueDateLabel(reminder.dueDate)}
-                      </CardDescription>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {upcomingReminders.map((reminder) => {
+              const daysUntil = differenceInDays(reminder.dueDate, new Date());
+              return (
+                <Card 
+                  key={reminder.id} 
+                  className="group relative overflow-hidden border-2 border-border hover:border-primary/50 bg-gradient-to-br from-card via-card to-card hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
+                >
+                  <div className={cn(
+                    "absolute top-0 left-0 right-0 h-1",
+                    reminder.priority === 'high' && "bg-gradient-to-r from-red-500 via-red-400 to-red-300",
+                    reminder.priority === 'medium' && "bg-gradient-to-r from-yellow-500 via-yellow-400 to-yellow-300",
+                    reminder.priority === 'low' && "bg-gradient-to-r from-blue-500 via-blue-400 to-blue-300"
+                  )} />
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-lg font-bold flex items-center gap-2 mb-2">
+                          <div className={cn(
+                            "p-1.5 rounded-lg flex-shrink-0",
+                            reminder.priority === 'high' && "bg-red-100 dark:bg-red-900/30",
+                            reminder.priority === 'medium' && "bg-yellow-100 dark:bg-yellow-900/30",
+                            reminder.priority === 'low' && "bg-blue-100 dark:bg-blue-900/30"
+                          )}>
+                            <Bell className={cn(
+                              "h-4 w-4",
+                              reminder.priority === 'high' && "text-red-600 dark:text-red-400",
+                              reminder.priority === 'medium' && "text-yellow-600 dark:text-yellow-400",
+                              reminder.priority === 'low' && "text-blue-600 dark:text-blue-400"
+                            )} />
+                          </div>
+                          <span className="truncate">{reminder.title}</span>
+                        </CardTitle>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                          <Calendar className="h-3.5 w-3.5" />
+                          <span className="font-medium">
+                            {isToday(reminder.dueDate) 
+                              ? 'Due today' 
+                              : isTomorrow(reminder.dueDate)
+                              ? 'Due tomorrow'
+                              : daysUntil <= 7
+                              ? `Due in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`
+                              : format(reminder.dueDate, 'MMM dd, yyyy')}
+                          </span>
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleOpenDialog(reminder)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleToggleComplete(reminder)}>
+                            <CheckCircle2 className="h-4 w-4 mr-2" />
+                            Mark Complete
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => handleDeleteClick(reminder)}
+                            className="text-red-600 dark:text-red-400"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className={getPriorityColor(reminder.priority || 'medium')}>
+                    <div className="flex items-center gap-2 ml-7 mt-2">
+                      <Badge 
+                        className={cn(
+                          "text-xs font-semibold",
+                          reminder.priority === 'high' && "bg-red-500 text-white",
+                          reminder.priority === 'medium' && "bg-yellow-500 text-white",
+                          reminder.priority === 'low' && "bg-blue-500 text-white"
+                        )}
+                      >
                         {getPriorityLabel(reminder.priority || 'medium')}
                       </Badge>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {reminder.description && (
-                    <p className="text-sm text-muted-foreground mb-4">
-                      {reminder.description}
-                    </p>
-                  )}
-                  {reminder.images && reminder.images.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2 mb-4">
-                      {reminder.images.map((imageUrl, index) => (
-                        <div key={index} className="relative group">
-                          <img
-                            src={imageUrl}
-                            alt={`Reminder image ${index + 1}`}
-                            className="w-full h-24 object-cover rounded"
-                          />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {reminder.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2 ml-7">
+                        {reminder.description}
+                      </p>
+                    )}
+                    {reminder.images && reminder.images.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 ml-7">
+                        {reminder.images.map((imageUrl, index) => (
+                          <div key={index} className="relative group/image overflow-hidden rounded-lg">
+                            <img
+                              src={imageUrl}
+                              alt={`Reminder image ${index + 1}`}
+                              className="w-full h-24 object-cover transition-transform duration-300 group-hover/image:scale-110"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
+                      <div className="ml-7">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                          <Users className="h-3.5 w-3.5" />
+                          <span>Assigned to:</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  {reminder.assignedMembers && reminder.assignedMembers.length > 0 && (
-                    <div className="mb-4">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                        <Users className="h-4 w-4" />
-                        <span>Assigned to:</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0 ? (
-                          reminder.assignedMemberNames.map((name, index) => (
-                            <Badge key={index} variant="secondary" className="text-xs">
-                              {name}
+                        <div className="flex flex-wrap gap-1.5">
+                          {reminder.assignedMemberNames && reminder.assignedMemberNames.length > 0 ? (
+                            reminder.assignedMemberNames.map((name, index) => (
+                              <Badge key={index} variant="secondary" className="text-xs">
+                                {name}
+                              </Badge>
+                            ))
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              {reminder.assignedMembers.length} member{reminder.assignedMembers.length !== 1 ? 's' : ''}
                             </Badge>
-                          ))
-                        ) : (
-                          <Badge variant="secondary" className="text-xs">
-                            {reminder.assignedMembers.length} member{reminder.assignedMembers.length !== 1 ? 's' : ''}
-                          </Badge>
-                        )}
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleToggleComplete(reminder)}
-                    >
-                      <Circle className="h-4 w-4 mr-2" />
-                      Mark Complete
-                    </Button>
-                    <div className="flex gap-2">
+                    )}
+                    <div className="flex items-center gap-2 pt-2 border-t ml-7">
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        onClick={() => handleOpenDialog(reminder)}
+                        onClick={() => handleToggleComplete(reminder)}
+                        className="flex-1"
                       >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteClick(reminder)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
+                        <Circle className="h-4 w-4 mr-2" />
+                        Mark Complete
                       </Button>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Completed Reminders */}
       {completedReminders.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-green-500" />
-            <h2 className="text-xl font-semibold">Completed</h2>
-            <Badge variant="secondary">{completedReminders.length}</Badge>
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+              <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Completed Reminders</h2>
+              <p className="text-sm text-muted-foreground">Your accomplished tasks</p>
+            </div>
+            <Badge variant="secondary" className="ml-auto text-sm px-3 py-1">{completedReminders.length}</Badge>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {completedReminders.map((reminder) => (
-              <Card key={reminder.id} className="opacity-60">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg flex items-center gap-2 line-through">
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        {reminder.title}
+              <Card 
+                key={reminder.id} 
+                className="group relative overflow-hidden border-2 border-green-200 dark:border-green-800/50 bg-gradient-to-br from-green-50/20 via-card to-card dark:from-green-950/5 opacity-75 hover:opacity-100 hover:shadow-lg transition-all duration-300"
+              >
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-500 via-green-400 to-green-300" />
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <CardTitle className="text-lg font-bold flex items-center gap-2 mb-2">
+                        <div className="p-1.5 rounded-lg bg-green-100 dark:bg-green-900/30 flex-shrink-0">
+                          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                        </div>
+                        <span className="truncate line-through">{reminder.title}</span>
                       </CardTitle>
-                      <CardDescription className="mt-1">
-                        Completed {reminder.completedAt ? format(reminder.completedAt, 'MMM dd, yyyy') : ''}
-                      </CardDescription>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                        <span className="font-medium">
+                          Completed {reminder.completedAt ? format(reminder.completedAt, 'MMM dd, yyyy') : ''}
+                        </span>
+                      </div>
                     </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleOpenDialog(reminder)}>
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleToggleComplete(reminder)}>
+                          <Circle className="h-4 w-4 mr-2" />
+                          Mark Incomplete
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => handleDeleteClick(reminder)}
+                          className="text-red-600 dark:text-red-400"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   {reminder.description && (
-                    <p className="text-sm text-muted-foreground mb-4 line-through">
+                    <p className="text-sm text-muted-foreground line-clamp-2 ml-7 line-through">
                       {reminder.description}
                     </p>
                   )}
                   {reminder.images && reminder.images.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2 mb-4 opacity-60">
+                    <div className="grid grid-cols-2 gap-2 ml-7 opacity-60">
                       {reminder.images.map((imageUrl, index) => (
-                        <div key={index} className="relative group">
+                        <div key={index} className="relative group/image overflow-hidden rounded-lg">
                           <img
                             src={imageUrl}
                             alt={`Reminder image ${index + 1}`}
-                            className="w-full h-24 object-cover rounded"
+                            className="w-full h-24 object-cover"
                           />
                         </div>
                       ))}
                     </div>
                   )}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 pt-2 border-t ml-7">
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
                       onClick={() => handleToggleComplete(reminder)}
+                      className="flex-1"
                     >
                       <Circle className="h-4 w-4 mr-2" />
                       Mark Incomplete
                     </Button>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenDialog(reminder)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteClick(reminder)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1033,20 +1333,243 @@ const Reminders = () => {
 
       {/* Empty State */}
       {reminders.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Bell className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No reminders yet</h3>
-            <p className="text-muted-foreground text-center mb-4">
-              Create your first reminder to get started
+        <Card className="border-2 border-dashed border-muted-foreground/25">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <div className="p-4 rounded-full bg-primary/10 mb-6">
+              <Bell className="h-12 w-12 text-primary" />
+            </div>
+            <h3 className="text-2xl font-bold mb-2">No reminders yet</h3>
+            <p className="text-muted-foreground text-center mb-6 max-w-md">
+              Get started by creating your first reminder. Stay organized and never miss important tasks.
             </p>
-            <Button onClick={() => handleOpenDialog()}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Reminder
+            <Button onClick={() => handleOpenDialog()} size="lg" className="shadow-lg">
+              <Plus className="h-5 w-5 mr-2" />
+              Create Your First Reminder
             </Button>
           </CardContent>
         </Card>
       )}
+
+        </TabsContent>
+
+        <TabsContent value="notifications" className="space-y-8 mt-8">
+          {notificationsLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Card key={i} className="overflow-hidden">
+                  <CardHeader>
+                    <Skeleton className="h-6 w-3/4" />
+                    <Skeleton className="h-4 w-1/2 mt-2" />
+                  </CardHeader>
+                  <CardContent>
+                    <Skeleton className="h-20 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Unread Notifications */}
+              {unreadNotifications.length > 0 && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-primary/10">
+                      <BellRing className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold">Unread Notifications</h2>
+                      <p className="text-sm text-muted-foreground">New updates that need your attention</p>
+                    </div>
+                    <Badge variant="destructive" className="ml-auto text-sm px-3 py-1 animate-pulse">
+                      {unreadNotifications.length}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {unreadNotifications.map((notification) => {
+                      const getNotificationIcon = () => {
+                        switch (notification.type) {
+                          case 'lead_assigned':
+                            return <Users className="h-5 w-5 text-blue-500" />;
+                          case 'reminder_assigned':
+                            return <Bell className="h-5 w-5 text-yellow-500" />;
+                          case 'task_assigned':
+                            return <CheckCircle2 className="h-5 w-5 text-green-500" />;
+                          default:
+                            return <BellRing className="h-5 w-5 text-primary" />;
+                        }
+                      };
+                      const getNotificationColor = () => {
+                        switch (notification.type) {
+                          case 'lead_assigned':
+                            return 'from-blue-500/10 to-blue-50/50 dark:to-blue-950/20 border-blue-200 dark:border-blue-800/50';
+                          case 'reminder_assigned':
+                            return 'from-yellow-500/10 to-yellow-50/50 dark:to-yellow-950/20 border-yellow-200 dark:border-yellow-800/50';
+                          case 'task_assigned':
+                            return 'from-green-500/10 to-green-50/50 dark:to-green-950/20 border-green-200 dark:border-green-800/50';
+                          default:
+                            return 'from-primary/10 to-primary/5 border-primary/20';
+                        }
+                      };
+                      return (
+                        <Card 
+                          key={notification.id} 
+                          className={cn(
+                            "group relative overflow-hidden border-2 bg-gradient-to-br hover:shadow-xl hover:scale-[1.02] transition-all duration-300",
+                            getNotificationColor()
+                          )}
+                        >
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60" />
+                          <CardHeader className="pb-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <CardTitle className="text-lg font-bold flex items-center gap-2 mb-2">
+                                  <div className="p-1.5 rounded-lg bg-primary/10 flex-shrink-0">
+                                    {getNotificationIcon()}
+                                  </div>
+                                  <span className="truncate">{notification.title}</span>
+                                </CardTitle>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                                  <Clock className="h-3.5 w-3.5" />
+                                  <span>{format(notification.createdAt, 'MMM dd, yyyy h:mm a')}</span>
+                                </div>
+                              </div>
+                              <Badge 
+                                variant="default" 
+                                className={cn(
+                                  "text-xs font-semibold capitalize",
+                                  notification.type === 'lead_assigned' && "bg-blue-500 text-white",
+                                  notification.type === 'reminder_assigned' && "bg-yellow-500 text-white",
+                                  notification.type === 'task_assigned' && "bg-green-500 text-white",
+                                  notification.type === 'general' && "bg-primary text-white"
+                                )}
+                              >
+                                {notification.type.replace('_', ' ')}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <p className="text-sm text-muted-foreground line-clamp-3 ml-7">
+                              {notification.message}
+                            </p>
+                            <div className="flex items-center gap-2 pt-2 border-t ml-7">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleMarkAsRead(notification.id)}
+                                className="flex-1"
+                              >
+                                <CheckCircle2 className="h-4 w-4 mr-2" />
+                                Mark Read
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteNotification(notification.id)}
+                                className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Read Notifications */}
+              {readNotifications.length > 0 && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold">Read Notifications</h2>
+                      <p className="text-sm text-muted-foreground">Previously viewed notifications</p>
+                    </div>
+                    <Badge variant="secondary" className="ml-auto text-sm px-3 py-1">{readNotifications.length}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {readNotifications.map((notification) => {
+                      const getNotificationIcon = () => {
+                        switch (notification.type) {
+                          case 'lead_assigned':
+                            return <Users className="h-5 w-5 text-blue-500" />;
+                          case 'reminder_assigned':
+                            return <Bell className="h-5 w-5 text-yellow-500" />;
+                          case 'task_assigned':
+                            return <CheckCircle2 className="h-5 w-5 text-green-500" />;
+                          default:
+                            return <BellRing className="h-5 w-5 text-muted-foreground" />;
+                        }
+                      };
+                      return (
+                        <Card 
+                          key={notification.id} 
+                          className="group relative overflow-hidden border-2 border-border bg-gradient-to-br from-card via-card to-card opacity-70 hover:opacity-100 hover:shadow-lg transition-all duration-300"
+                        >
+                          <CardHeader className="pb-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <CardTitle className="text-lg font-bold flex items-center gap-2 mb-2">
+                                  <div className="p-1.5 rounded-lg bg-muted flex-shrink-0">
+                                    {getNotificationIcon()}
+                                  </div>
+                                  <span className="truncate">{notification.title}</span>
+                                </CardTitle>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                                  <Clock className="h-3.5 w-3.5" />
+                                  <span>{format(notification.createdAt, 'MMM dd, yyyy h:mm a')}</span>
+                                </div>
+                              </div>
+                              <Badge variant="secondary" className="text-xs capitalize">
+                                {notification.type.replace('_', ' ')}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <p className="text-sm text-muted-foreground line-clamp-3 ml-7">
+                              {notification.message}
+                            </p>
+                            <div className="flex justify-end pt-2 border-t ml-7">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteNotification(notification.id)}
+                                className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {notifications.length === 0 && (
+                <Card className="border-2 border-dashed border-muted-foreground/25">
+                  <CardContent className="flex flex-col items-center justify-center py-16">
+                    <div className="p-4 rounded-full bg-primary/10 mb-6">
+                      <BellRing className="h-12 w-12 text-primary" />
+                    </div>
+                    <h3 className="text-2xl font-bold mb-2">No notifications yet</h3>
+                    <p className="text-muted-foreground text-center max-w-md">
+                      You'll see notifications here when you're assigned to leads, reminders, or tasks. Stay tuned!
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
