@@ -51,7 +51,16 @@ import {
   MoreVertical,
   Eye,
   FileText,
-  Tag
+  Tag,
+  Globe,
+  Briefcase,
+  UserPlus,
+  ExternalLink,
+  MessageSquare,
+  Clipboard,
+  CheckSquare,
+  Star,
+  Flag
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -81,6 +90,7 @@ import {
   subscribeToRecruitmentLeads
 } from '@/lib/recruitment-leads';
 import { LeadAnalytics } from '@/types/recruitment-lead';
+import { createNotification } from '@/lib/notifications';
 
 const STATUSES: LeadStatus[] = ['New', 'Contacted', 'Qualified', 'Meeting Scheduled', 'Follow-up Required', 'Converted', 'Lost', 'On Hold'];
 const KANBAN_STATUSES: LeadStatus[] = ['New', 'Contacted', 'Qualified', 'Meeting Scheduled'];
@@ -247,11 +257,11 @@ function DroppableLeadColumn({
   return (
     <div 
       ref={setNodeRef}
-      className={`flex-shrink-0 w-[280px] ${isActive ? 'ring-2 ring-primary ring-offset-2 rounded-lg' : ''}`}
+      className={`flex-1 min-w-0 ${isActive ? 'ring-2 ring-primary ring-offset-2 rounded-lg' : ''}`}
     >
       <div className={`mb-3 flex items-center justify-between p-3 rounded-lg bg-muted/30 border-2 ${isActive ? 'border-primary' : ''}`}>
-        <h3 className="font-semibold text-sm uppercase tracking-wide">{title}</h3>
-        <Badge variant="secondary" className="font-semibold">{leadCount}</Badge>
+        <h3 className="font-semibold text-sm uppercase tracking-wide truncate">{title}</h3>
+        <Badge variant="secondary" className="font-semibold flex-shrink-0 ml-2">{leadCount}</Badge>
       </div>
       <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {leadCount === 0 && !isActive ? (
@@ -473,6 +483,7 @@ const RecruitmentLeads = () => {
       }
       if (formData.tags && formData.tags.length > 0) leadData.tags = formData.tags;
 
+      let leadId: string;
       if (editingLead) {
         // Filter out undefined values before updating
         const updateData: any = {
@@ -488,26 +499,46 @@ const RecruitmentLeads = () => {
         });
         
         await updateRecruitmentLead(editingLead.id, updateData);
+        leadId = editingLead.id;
         toast({
           title: 'Success',
           description: 'Lead updated successfully',
         });
       } else {
-        await createRecruitmentLead(leadData);
+        leadId = await createRecruitmentLead(leadData);
         toast({
           title: 'Success',
           description: 'Lead created successfully',
         });
       }
 
-      // Send notification if employee is assigned
-      if (assignedEmployee && !editingLead) {
-        const selectedUser = allUsers.find(u => u.id === assignedEmployee);
+      // Send notification if employee is assigned (new assignment or changed assignment)
+      const currentAssignedEmployee = assignedEmployee || formData.assignedTo;
+      const previousAssignedEmployee = editingLead?.assignedTo;
+      
+      if (currentAssignedEmployee && currentAssignedEmployee !== previousAssignedEmployee) {
+        const selectedUser = allUsers.find(u => u.id === currentAssignedEmployee);
         if (selectedUser) {
-          toast({
-            title: 'Employee Assigned',
-            description: `${selectedUser.name || selectedUser.email} has been notified about this lead assignment.`,
-          });
+          try {
+            const leadTitle = leadData.businessName || 'a recruitment lead';
+            await createNotification({
+              userId: selectedUser.id,
+              type: 'lead_assigned',
+              title: 'New Lead Assignment',
+              message: `You have been assigned to lead: ${leadTitle} (${leadData.jobRole || 'N/A'})`,
+              relatedId: leadId,
+              relatedType: 'lead',
+              createdBy: user.id,
+              createdByName: user.name || 'Unknown',
+            });
+            toast({
+              title: 'Employee Assigned',
+              description: `${selectedUser.name || selectedUser.email} has been notified about this lead assignment.`,
+            });
+          } catch (error) {
+            console.error('Error creating notification:', error);
+            // Don't fail the whole operation if notification fails
+          }
         }
       }
 
@@ -1058,7 +1089,7 @@ const RecruitmentLeads = () => {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-2 col-span-2">
+                      <div className="space-y-2">
                         <Label htmlFor="meetingDate">Meeting Date</Label>
                         <Popover>
                           <PopoverTrigger asChild>
@@ -1683,8 +1714,8 @@ const RecruitmentLeads = () => {
               onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
             >
-              <div className="overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                <div className="flex gap-4 min-w-max">
+              <div className="w-full pb-4">
+                <div className="flex gap-4 w-full">
                   {KANBAN_STATUSES.map((status) => {
                     const columnLeads = leadsByStatus[status] || [];
                     const leadIds = columnLeads.map(lead => lead.id);
@@ -1720,213 +1751,467 @@ const RecruitmentLeads = () => {
 
       {/* View Lead Dialog */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-hide">
+        <DialogContent className="max-w-5xl max-h-[95vh] overflow-hidden p-0 gap-0">
           {selectedLead && (
             <>
-              <DialogHeader>
-                <DialogTitle>{selectedLead.businessName}</DialogTitle>
-                <DialogDescription>Lead ID: {selectedLead.leadId}</DialogDescription>
-              </DialogHeader>
-              <Tabs defaultValue="details" className="w-full">
-                <TabsList>
-                  <TabsTrigger value="details">Details</TabsTrigger>
-                  <TabsTrigger value="activity">Activity</TabsTrigger>
-                  <TabsTrigger value="followups">Follow-ups</TabsTrigger>
-                </TabsList>
-                <TabsContent value="details" className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Date of Recording</Label>
-                      <p className="text-sm">{format(selectedLead.dateOfRecording, 'MMM dd, yyyy')}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Platform</Label>
-                      <div className="text-sm"><Badge>{selectedLead.platform}</Badge></div>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Business Name</Label>
-                      <p className="text-sm font-medium">{selectedLead.businessName}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Job Location</Label>
-                      <p className="text-sm">{selectedLead.jobLocation}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Job Role</Label>
-                      <p className="text-sm">{selectedLead.jobRole}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Business Owner / Manager</Label>
-                      <p className="text-sm">{selectedLead.businessOwnerManager}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Vacancy</Label>
-                      <p className="text-sm">{selectedLead.vacancy}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Contact No.</Label>
-                      <p className="text-sm">{selectedLead.contactNo}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Email Address</Label>
-                      <p className="text-sm">{selectedLead.emailAddress || '-'}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Status</Label>
-                      <div className="text-sm">
-                        <Badge className={STATUS_COLORS[selectedLead.status]}>
-                          {selectedLead.status}
-                        </Badge>
+              {/* Enhanced Header with Gradient */}
+              <div className="relative overflow-hidden bg-gradient-to-br from-primary/20 via-primary/10 to-blue-500/10 border-b border-primary/20">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent" />
+                <div className="relative p-6 pb-4">
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="relative">
+                          <div className="absolute inset-0 bg-primary/20 blur-xl rounded-2xl" />
+                          <div className="relative p-2.5 rounded-xl bg-gradient-to-br from-primary/30 to-primary/10 border border-primary/30">
+                            <Building2 className="h-6 w-6 text-primary" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <DialogTitle className="text-2xl font-bold mb-1.5 bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+                            {selectedLead.businessName}
+                          </DialogTitle>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="font-mono font-semibold text-xs px-2.5 py-1 bg-background/80 border-primary/30">
+                              {selectedLead.leadId}
+                            </Badge>
+                            <Badge className={`${STATUS_COLORS[selectedLead.status]} font-semibold shadow-sm`}>
+                              {selectedLead.status}
+                            </Badge>
+                            <Badge className={`${PRIORITY_COLORS[selectedLead.priority]} font-semibold shadow-sm`}>
+                              {selectedLead.priority}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          <CalendarIcon className="h-4 w-4" />
+                          <span>{format(selectedLead.dateOfRecording, 'MMM dd, yyyy')}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Globe className="h-4 w-4" />
+                          <span>{selectedLead.platform}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <TrendingUp className="h-4 w-4" />
+                          <span className="font-semibold text-foreground">Lead Score: {selectedLead.leadScore}/100</span>
+                        </div>
                       </div>
                     </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Priority</Label>
-                      <div className="text-sm">
-                        <Badge className={PRIORITY_COLORS[selectedLead.priority]}>
-                          {selectedLead.priority}
-                        </Badge>
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Lead Score</Label>
-                      <p className="text-sm font-medium">{selectedLead.leadScore}/100</p>
-                    </div>
-                    {selectedLead.link && (
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Link</Label>
-                        <p className="text-sm">
-                          <a href={selectedLead.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                            View Link
-                          </a>
-                        </p>
+                    {canEdit && (
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setViewDialogOpen(false);
+                            handleEdit(selectedLead);
+                          }}
+                          className="shadow-sm hover:shadow-md transition-all"
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
                       </div>
                     )}
                   </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Call Notes</Label>
-                    <p className="text-sm whitespace-pre-wrap mt-1 p-3 bg-muted rounded-md">
-                      {selectedLead.callNotes}
-                    </p>
-                  </div>
-                  {selectedLead.remarks && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Remarks</Label>
-                      <p className="text-sm whitespace-pre-wrap mt-1 p-3 bg-muted rounded-md">
-                        {selectedLead.remarks}
-                      </p>
-                    </div>
-                  )}
-                  {selectedLead.recap && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Recap</Label>
-                      <p className="text-sm whitespace-pre-wrap mt-1 p-3 bg-muted rounded-md">
-                        {selectedLead.recap}
-                      </p>
-                    </div>
-                  )}
-                  {selectedLead.tasks && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Tasks</Label>
-                      <p className="text-sm whitespace-pre-wrap mt-1 p-3 bg-muted rounded-md">
-                        {selectedLead.tasks}
-                      </p>
-                    </div>
-                  )}
-                  {selectedLead.isEmployee && (
-                    <div className="grid grid-cols-2 gap-4">
-                      {selectedLead.employeeName && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Employee Name</Label>
-                          <p className="text-sm font-medium mt-1">{selectedLead.employeeName}</p>
-                        </div>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto max-h-[calc(95vh-180px)] px-6 py-4">
+                <Tabs defaultValue="details" className="w-full">
+                  <TabsList className="grid w-full grid-cols-3 mb-6 bg-muted/50">
+                    <TabsTrigger value="details" className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Details
+                    </TabsTrigger>
+                    <TabsTrigger value="activity" className="flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Activity
+                      {selectedLead.activityLog.length > 0 && (
+                        <Badge variant="secondary" className="ml-1 h-5 min-w-5 px-1.5 text-xs">
+                          {selectedLead.activityLog.length}
+                        </Badge>
                       )}
-                      {selectedLead.employeePosition && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Employee Position</Label>
-                          <p className="text-sm font-medium mt-1">{selectedLead.employeePosition}</p>
-                        </div>
+                    </TabsTrigger>
+                    <TabsTrigger value="followups" className="flex items-center gap-2">
+                      <CheckSquare className="h-4 w-4" />
+                      Follow-ups
+                      {selectedLead.followUps.length > 0 && (
+                        <Badge variant="secondary" className="ml-1 h-5 min-w-5 px-1.5 text-xs">
+                          {selectedLead.followUps.length}
+                        </Badge>
                       )}
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="details" className="space-y-6 mt-0">
+                    {/* Key Information Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50 hover:shadow-lg transition-all">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-primary" />
+                            Business Information
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Business Name</Label>
+                            <p className="text-sm font-semibold">{selectedLead.businessName}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              <MapPin className="h-3.5 w-3.5" />
+                              Location
+                            </Label>
+                            <p className="text-sm">{selectedLead.jobLocation}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              <User className="h-3.5 w-3.5" />
+                              Owner / Manager
+                            </Label>
+                            <p className="text-sm font-medium">{selectedLead.businessOwnerManager}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50 hover:shadow-lg transition-all">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                            <Briefcase className="h-4 w-4 text-primary" />
+                            Job Details
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Job Role</Label>
+                            <p className="text-sm font-semibold">{selectedLead.jobRole}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              <UserPlus className="h-3.5 w-3.5" />
+                              Vacancy
+                            </Label>
+                            <p className="text-sm">{selectedLead.vacancy}</p>
+                          </div>
+                          {selectedLead.isEmployee && (
+                            <div className="pt-2 border-t space-y-2">
+                              {selectedLead.employeeName && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Employee Name</Label>
+                                  <p className="text-sm font-medium">{selectedLead.employeeName}</p>
+                                </div>
+                              )}
+                              {selectedLead.employeePosition && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Position</Label>
+                                  <p className="text-sm font-medium">{selectedLead.employeePosition}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
                     </div>
-                  )}
-                  {canEdit && (
-                    <div className="flex gap-2 pt-4">
-                      <Button onClick={() => {
-                        setViewDialogOpen(false);
-                        handleEdit(selectedLead);
-                      }}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit Lead
-                      </Button>
-                      <Select
-                        value={selectedLead.status}
-                        onValueChange={(value) => handleStatusChange(selectedLead.id, value as LeadStatus, selectedLead.status)}
-                      >
-                        <SelectTrigger className="w-[200px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STATUSES.map((status) => (
-                            <SelectItem key={status} value={status}>{status}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                </TabsContent>
-                <TabsContent value="activity" className="space-y-4">
-                  <div className="space-y-3">
+
+                    {/* Contact Information */}
+                    <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-primary" />
+                          Contact Information
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
+                            <div className="p-2 rounded-lg bg-primary/10">
+                              <Phone className="h-4 w-4 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <Label className="text-xs text-muted-foreground">Phone</Label>
+                              <p className="text-sm font-medium">{selectedLead.contactNo}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border/50">
+                            <div className="p-2 rounded-lg bg-primary/10">
+                              <Mail className="h-4 w-4 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <Label className="text-xs text-muted-foreground">Email</Label>
+                              <p className="text-sm font-medium truncate">{selectedLead.emailAddress || 'Not provided'}</p>
+                            </div>
+                          </div>
+                          {selectedLead.link && (
+                            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border/50 md:col-span-2">
+                              <div className="p-2 rounded-lg bg-primary/10">
+                                <ExternalLink className="h-4 w-4 text-primary" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <Label className="text-xs text-muted-foreground">Source Link</Label>
+                                <a 
+                                  href={selectedLead.link} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="text-sm font-medium text-primary hover:underline flex items-center gap-1.5"
+                                >
+                                  <span className="truncate">{selectedLead.link}</span>
+                                  <ExternalLink className="h-3.5 w-3.5 flex-shrink-0" />
+                                </a>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Call Notes - Enhanced */}
+                    <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                          <MessageSquare className="h-4 w-4 text-primary" />
+                          Call Notes
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">
+                            {selectedLead.callNotes}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Recap Section */}
+                    {selectedLead.recap && (
+                      <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                            <Clipboard className="h-4 w-4 text-primary" />
+                            Recap
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">
+                              {selectedLead.recap}
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Tasks Section */}
+                    {selectedLead.tasks && (
+                      <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                            <CheckSquare className="h-4 w-4 text-primary" />
+                            Tasks
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">
+                              {selectedLead.tasks}
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Remarks Section */}
+                    {selectedLead.remarks && (
+                      <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-primary" />
+                            Remarks
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">
+                              {selectedLead.remarks}
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Action Buttons */}
+                    {canEdit && (
+                      <div className="flex items-center justify-between gap-4 pt-4 border-t">
+                        <Button 
+                          onClick={() => {
+                            setViewDialogOpen(false);
+                            handleEdit(selectedLead);
+                          }}
+                          className="shadow-md hover:shadow-lg transition-all"
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit Lead
+                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm text-muted-foreground">Update Status:</Label>
+                          <Select
+                            value={selectedLead.status}
+                            onValueChange={(value) => handleStatusChange(selectedLead.id, value as LeadStatus, selectedLead.status)}
+                          >
+                            <SelectTrigger className="w-[200px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {STATUSES.map((status) => (
+                                <SelectItem key={status} value={status}>{status}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="activity" className="space-y-4 mt-0">
                     {selectedLead.activityLog.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-8">No activity recorded</p>
+                      <div className="text-center py-12">
+                        <div className="p-4 rounded-full bg-muted/50 w-fit mx-auto mb-4">
+                          <Clock className="h-8 w-8 text-muted-foreground/50" />
+                        </div>
+                        <p className="text-sm text-muted-foreground font-medium">No activity recorded</p>
+                        <p className="text-xs text-muted-foreground mt-1">Activity will appear here as you interact with this lead</p>
+                      </div>
                     ) : (
-                      selectedLead.activityLog
-                        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-                        .map((activity) => (
-                          <div key={activity.id} className="flex gap-3 p-3 border rounded-lg">
-                            <div className="flex-shrink-0">
-                              {activity.type === 'call' && <Phone className="h-4 w-4 text-blue-600" />}
-                              {activity.type === 'email' && <Mail className="h-4 w-4 text-green-600" />}
-                              {activity.type === 'meeting' && <CalendarIcon className="h-4 w-4 text-purple-600" />}
-                              {activity.type === 'note' && <FileText className="h-4 w-4 text-gray-600" />}
-                              {activity.type === 'status_change' && <CheckCircle2 className="h-4 w-4 text-orange-600" />}
-                              {activity.type === 'follow_up' && <Clock className="h-4 w-4 text-pink-600" />}
+                      <div className="space-y-3">
+                        {selectedLead.activityLog
+                          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+                          .map((activity, index) => (
+                            <div key={activity.id} className="relative">
+                              {index < selectedLead.activityLog.length - 1 && (
+                                <div className="absolute left-6 top-12 bottom-0 w-0.5 bg-border" />
+                              )}
+                              <Card className="border-2 border-border/50 hover:border-primary/30 hover:shadow-md transition-all">
+                                <CardContent className="p-4">
+                                  <div className="flex gap-4">
+                                    <div className="flex-shrink-0">
+                                      <div className={`p-2.5 rounded-lg ${
+                                        activity.type === 'call' ? 'bg-blue-100 dark:bg-blue-900/30' :
+                                        activity.type === 'email' ? 'bg-green-100 dark:bg-green-900/30' :
+                                        activity.type === 'meeting' ? 'bg-purple-100 dark:bg-purple-900/30' :
+                                        activity.type === 'status_change' ? 'bg-orange-100 dark:bg-orange-900/30' :
+                                        activity.type === 'follow_up' ? 'bg-pink-100 dark:bg-pink-900/30' :
+                                        'bg-gray-100 dark:bg-gray-900/30'
+                                      }`}>
+                                        {activity.type === 'call' && <Phone className="h-5 w-5 text-blue-600 dark:text-blue-400" />}
+                                        {activity.type === 'email' && <Mail className="h-5 w-5 text-green-600 dark:text-green-400" />}
+                                        {activity.type === 'meeting' && <CalendarIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />}
+                                        {activity.type === 'note' && <FileText className="h-5 w-5 text-gray-600 dark:text-gray-400" />}
+                                        {activity.type === 'status_change' && <CheckCircle2 className="h-5 w-5 text-orange-600 dark:text-orange-400" />}
+                                        {activity.type === 'follow_up' && <Clock className="h-5 w-5 text-pink-600 dark:text-pink-400" />}
+                                      </div>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-semibold mb-1">{activity.description}</p>
+                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <User className="h-3.5 w-3.5" />
+                                        <span>{activity.userName}</span>
+                                        <span>•</span>
+                                        <Clock className="h-3.5 w-3.5" />
+                                        <span>{format(activity.timestamp, 'MMM dd, yyyy HH:mm')}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
                             </div>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium">{activity.description}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {activity.userName} • {format(activity.timestamp, 'MMM dd, yyyy HH:mm')}
-                              </p>
-                            </div>
-                          </div>
-                        ))
+                          ))}
+                      </div>
                     )}
-                  </div>
-                </TabsContent>
-                <TabsContent value="followups" className="space-y-4">
-                  <div className="space-y-3">
+                  </TabsContent>
+
+                  <TabsContent value="followups" className="space-y-4 mt-0">
                     {selectedLead.followUps.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-8">No follow-ups scheduled</p>
+                      <div className="text-center py-12">
+                        <div className="p-4 rounded-full bg-muted/50 w-fit mx-auto mb-4">
+                          <CheckSquare className="h-8 w-8 text-muted-foreground/50" />
+                        </div>
+                        <p className="text-sm text-muted-foreground font-medium">No follow-ups scheduled</p>
+                        <p className="text-xs text-muted-foreground mt-1">Add follow-ups to track important tasks</p>
+                      </div>
                     ) : (
-                      selectedLead.followUps
-                        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
-                        .map((followUp) => (
-                          <div key={followUp.id} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div className="flex-1">
-                              <p className="text-sm font-medium">{followUp.description}</p>
-                              <p className="text-xs text-muted-foreground">
-                                Due: {format(followUp.dueDate, 'MMM dd, yyyy')} • {followUp.type}
-                              </p>
-                            </div>
-                            {followUp.completed ? (
-                              <Badge className="bg-green-100 text-green-800">Completed</Badge>
-                            ) : (
-                              <Badge variant="outline">Pending</Badge>
-                            )}
-                          </div>
-                        ))
+                      <div className="space-y-3">
+                        {selectedLead.followUps
+                          .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+                          .map((followUp) => {
+                            const isOverdue = !followUp.completed && followUp.dueDate < new Date();
+                            const isUpcoming = !followUp.completed && followUp.dueDate >= new Date() && followUp.dueDate <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+                            
+                            return (
+                              <Card 
+                                key={followUp.id} 
+                                className={`border-2 transition-all hover:shadow-md ${
+                                  isOverdue ? 'border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20' :
+                                  isUpcoming ? 'border-orange-200 dark:border-orange-900/50 bg-orange-50/50 dark:bg-orange-950/20' :
+                                  followUp.completed ? 'border-green-200 dark:border-green-900/50 bg-green-50/50 dark:bg-green-950/20' :
+                                  'border-border/50'
+                                }`}
+                              >
+                                <CardContent className="p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <CheckSquare className={`h-4 w-4 ${
+                                          followUp.completed ? 'text-green-600 dark:text-green-400' :
+                                          isOverdue ? 'text-red-600 dark:text-red-400' :
+                                          'text-muted-foreground'
+                                        }`} />
+                                        <p className="text-sm font-semibold">{followUp.description}</p>
+                                      </div>
+                                      <div className="flex items-center gap-3 text-xs text-muted-foreground ml-6">
+                                        <div className="flex items-center gap-1.5">
+                                          <CalendarIcon className="h-3.5 w-3.5" />
+                                          <span>Due: {format(followUp.dueDate, 'MMM dd, yyyy')}</span>
+                                        </div>
+                                        <span>•</span>
+                                        <span className="capitalize">{followUp.type}</span>
+                                        {followUp.createdByName && (
+                                          <>
+                                            <span>•</span>
+                                            <span>Created by {followUp.createdByName}</span>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex-shrink-0">
+                                      {followUp.completed ? (
+                                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 font-semibold">
+                                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                                          Completed
+                                        </Badge>
+                                      ) : isOverdue ? (
+                                        <Badge variant="destructive" className="font-semibold">
+                                          <AlertCircle className="h-3 w-3 mr-1" />
+                                          Overdue
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="font-semibold">
+                                          Pending
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                      </div>
                     )}
-                  </div>
-                </TabsContent>
-              </Tabs>
+                  </TabsContent>
+                </Tabs>
+              </div>
             </>
           )}
         </DialogContent>

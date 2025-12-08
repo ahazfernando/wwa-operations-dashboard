@@ -13,9 +13,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
-import { Plus, Calendar, Trash2, Edit, Bell, CheckCircle2, Circle, AlertCircle, Image as ImageIcon, Upload, X, Loader2, Search, ChevronDown, Users } from 'lucide-react';
+import { Plus, Calendar, Trash2, Edit, Bell, CheckCircle2, Circle, AlertCircle, Image as ImageIcon, Upload, X, Loader2, Search, ChevronDown, Users, BellRing } from 'lucide-react';
 import { Reminder } from '@/types/reminder';
 import { createReminder, getRemindersByUser, updateReminder, deleteReminder } from '@/lib/reminders';
+import { Notification } from '@/types/notification';
+import { getNotificationsByUser, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification } from '@/lib/notifications';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { uploadImageToCloudinary } from '@/lib/cloudinary';
 import { format, isPast, isToday, isTomorrow } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -32,7 +35,10 @@ interface User {
 const Reminders = () => {
   const { user, getAllUsers } = useAuth();
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'reminders' | 'notifications'>('reminders');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -55,6 +61,7 @@ const Reminders = () => {
   useEffect(() => {
     if (user) {
       loadReminders();
+      loadNotifications();
       loadUsers();
     }
   }, [user]);
@@ -91,6 +98,73 @@ const Reminders = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadNotifications = async () => {
+    if (!user) return;
+    
+    try {
+      setNotificationsLoading(true);
+      const userNotifications = await getNotificationsByUser(user.id);
+      setNotifications(userNotifications);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load notifications',
+        variant: 'destructive',
+      });
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      await markNotificationAsRead(notificationId);
+      await loadNotifications();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to mark notification as read',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (!user) return;
+    
+    try {
+      await markAllNotificationsAsRead(user.id);
+      await loadNotifications();
+      toast({
+        title: 'Success',
+        description: 'All notifications marked as read',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to mark all notifications as read',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId: string) => {
+    try {
+      await deleteNotification(notificationId);
+      await loadNotifications();
+      toast({
+        title: 'Success',
+        description: 'Notification deleted',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete notification',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -422,7 +496,7 @@ const Reminders = () => {
     };
   }, [reminders]);
 
-  if (loading) {
+  if (loading && activeTab === 'reminders') {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -448,16 +522,21 @@ const Reminders = () => {
     );
   }
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+  const readNotifications = notifications.filter(n => n.read);
+  const unreadNotifications = notifications.filter(n => !n.read);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Reminders</h1>
+          <h1 className="text-3xl font-bold text-foreground">Reminders & Notifications</h1>
           <p className="text-muted-foreground mt-1">
-            Manage your personal reminders and tasks
+            Manage your personal reminders, tasks, and notifications
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        {activeTab === 'reminders' && (
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button onClick={() => handleOpenDialog()}>
               <Plus className="h-4 w-4 mr-2" />
@@ -749,8 +828,33 @@ const Reminders = () => {
             </div>
           </DialogContent>
         </Dialog>
+        )}
+        {activeTab === 'notifications' && unreadCount > 0 && (
+          <Button variant="outline" onClick={handleMarkAllAsRead}>
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Mark All as Read
+          </Button>
+        )}
       </div>
 
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'reminders' | 'notifications')} className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="reminders" className="flex items-center gap-2">
+            <Bell className="h-4 w-4" />
+            Reminders
+          </TabsTrigger>
+          <TabsTrigger value="notifications" className="flex items-center gap-2">
+            <BellRing className="h-4 w-4" />
+            Notifications
+            {unreadCount > 0 && (
+              <Badge variant="destructive" className="ml-1">
+                {unreadCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="reminders" className="space-y-6 mt-6">
       {/* Overdue Reminders */}
       {overdueReminders.length > 0 && (
         <div className="space-y-4">
@@ -1047,6 +1151,144 @@ const Reminders = () => {
           </CardContent>
         </Card>
       )}
+
+        </TabsContent>
+
+        <TabsContent value="notifications" className="space-y-6 mt-6">
+          {notificationsLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Card key={i}>
+                  <CardHeader>
+                    <Skeleton className="h-6 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </CardHeader>
+                  <CardContent>
+                    <Skeleton className="h-20 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Unread Notifications */}
+              {unreadNotifications.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <BellRing className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-semibold">Unread</h2>
+                    <Badge variant="destructive">{unreadNotifications.length}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {unreadNotifications.map((notification) => (
+                      <Card key={notification.id} className="border-primary/20 bg-primary/5">
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <BellRing className="h-4 w-4 text-primary" />
+                                {notification.title}
+                              </CardTitle>
+                              <CardDescription className="mt-1">
+                                {format(notification.createdAt, 'MMM dd, yyyy h:mm a')}
+                              </CardDescription>
+                            </div>
+                            <Badge variant="default" className="bg-primary">
+                              {notification.type.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-sm text-muted-foreground mb-4">
+                            {notification.message}
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleMarkAsRead(notification.id)}
+                            >
+                              <CheckCircle2 className="h-4 w-4 mr-2" />
+                              Mark as Read
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteNotification(notification.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Read Notifications */}
+              {readNotifications.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <h2 className="text-xl font-semibold">Read</h2>
+                    <Badge variant="secondary">{readNotifications.length}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {readNotifications.map((notification) => (
+                      <Card key={notification.id} className="opacity-60">
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                {notification.title}
+                              </CardTitle>
+                              <CardDescription className="mt-1">
+                                {format(notification.createdAt, 'MMM dd, yyyy h:mm a')}
+                              </CardDescription>
+                            </div>
+                            <Badge variant="secondary">
+                              {notification.type.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-sm text-muted-foreground mb-4">
+                            {notification.message}
+                          </p>
+                          <div className="flex justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteNotification(notification.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {notifications.length === 0 && (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <BellRing className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No notifications yet</h3>
+                    <p className="text-muted-foreground text-center">
+                      You'll see notifications here when you're assigned to leads, reminders, or tasks
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
