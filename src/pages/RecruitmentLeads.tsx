@@ -341,7 +341,12 @@ const RecruitmentLeads = () => {
       search?: string;
     } = {};
     
-    if (filters.status && filters.status !== '') {
+    // Type guard: check if status is a valid LeadStatus (not empty string)
+    const isValidStatus = (status: LeadStatus | ''): status is LeadStatus => {
+      return status !== '';
+    };
+    
+    if (isValidStatus(filters.status)) {
       cleaned.status = filters.status;
     }
     if (filters.platform && filters.platform !== '') {
