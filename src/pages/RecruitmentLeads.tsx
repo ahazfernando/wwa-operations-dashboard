@@ -331,6 +331,35 @@ const RecruitmentLeads = () => {
                   (user?.role === 'itteam' && user.permissions?.leadTracking === 'crud');
   const canView = canEdit || (user?.role === 'itteam' && user.permissions?.leadTracking === 'read');
 
+  // Helper function to clean filters (remove empty strings)
+  const cleanFilters = (includeSearch = false) => {
+    const cleaned: {
+      status?: LeadStatus;
+      platform?: string;
+      priority?: string;
+      assignedTo?: string;
+      search?: string;
+    } = {};
+    
+    if (filters.status && filters.status !== '') {
+      cleaned.status = filters.status;
+    }
+    if (filters.platform && filters.platform !== '') {
+      cleaned.platform = filters.platform;
+    }
+    if (filters.priority && filters.priority !== '') {
+      cleaned.priority = filters.priority;
+    }
+    if (filters.assignedTo && filters.assignedTo !== '') {
+      cleaned.assignedTo = filters.assignedTo;
+    }
+    if (includeSearch && searchQuery && searchQuery !== '') {
+      cleaned.search = searchQuery;
+    }
+    
+    return cleaned;
+  };
+
   // Load leads
   useEffect(() => {
     if (!canView) return;
@@ -338,7 +367,7 @@ const RecruitmentLeads = () => {
     const loadLeads = async () => {
       try {
         setLoading(true);
-        const fetchedLeads = await getAllRecruitmentLeads(filters);
+        const fetchedLeads = await getAllRecruitmentLeads(cleanFilters(true));
         setLeads(fetchedLeads);
         
         const analyticsData = await getRecruitmentLeadsAnalytics();
@@ -356,7 +385,7 @@ const RecruitmentLeads = () => {
     };
 
     loadLeads();
-  }, [filters, canView]);
+  }, [filters, canView, searchQuery]);
 
   // Subscribe to real-time updates
   useEffect(() => {
@@ -364,7 +393,7 @@ const RecruitmentLeads = () => {
 
     const unsubscribe = subscribeToRecruitmentLeads((updatedLeads) => {
       setLeads(updatedLeads);
-    }, filters);
+    }, cleanFilters(false));
 
     return () => unsubscribe();
   }, [filters, canView, user]);
