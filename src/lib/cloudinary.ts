@@ -93,6 +93,7 @@ export async function uploadFileToCloudinary(
   formData.append('upload_preset', uploadPreset);
   formData.append('folder', folder);
   formData.append('resource_type', 'raw'); // Use raw for PDFs and other documents
+  // Note: access_mode should be configured in the upload preset settings, not passed as a parameter
 
   try {
     const response = await fetch(
