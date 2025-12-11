@@ -45,7 +45,8 @@ const menuItems = [
   { title: 'Work From Home Location', url: '/work-from-home', icon: MapPin, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Employee Ratings', url: '/ratings', icon: Star, roles: ['admin', 'operationsstaff'] },
   // { title: 'Lead Tracking', url: '/leads', icon: Users, roles: ['admin', 'operationsstaff', 'itteam'] },
-  { title: 'Recruitment Leads', url: '/recruitment-leads', icon: Briefcase, roles: ['admin', 'operationsstaff', 'itteam'] },
+  { title: 'Recruitment Leads', url: '/recruitment-leads', icon: Briefcase, roles: ['admin'] },
+  { title: 'Candidate CVs', url: '/candidate-cvs', icon: UserCheck, roles: ['admin'] },
   { title: 'Tasks', url: '/tasks', icon: CheckSquare, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Reminders', url: '/reminders', icon: Bell, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Availability', url: '/availability', icon: CheckCircle, roles: ['admin', 'operationsstaff', 'itteam'] },
@@ -130,18 +131,6 @@ function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild>
                     <NavLink 
-                      to="/candidate-cvs" 
-                      className="hover:bg-sidebar-accent"
-                      activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    >
-                      <UserCheck className="h-4 w-4" />
-                      {!isCollapsed && <span>Candidate CVs</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild>
-                    <NavLink 
                       to="/settings" 
                       className="hover:bg-sidebar-accent"
                       activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -187,7 +176,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
           <header className="h-14 border-b bg-card flex items-center px-4">
             <SidebarTrigger />
           </header>
-          <main className="flex-1 p-6 bg-background">
+          <main className="flex-1 p-3 sm:p-4 md:p-6 bg-background">
             {children}
           </main>
         </div>

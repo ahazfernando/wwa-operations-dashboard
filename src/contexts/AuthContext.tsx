@@ -14,7 +14,7 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, whe
 import { auth, db } from '@/lib/firebase';
 
 export type UserRole = 'admin' | 'operationsstaff' | 'itteam';
-export type UserStatus = 'pending' | 'approved' | 'rejected';
+export type UserStatus = 'pending' | 'approved' | 'rejected' | 'terminated';
 
 export interface User {
   id: string;
@@ -36,6 +36,8 @@ interface AuthContextType {
   signInWithGithub: () => Promise<void>;
   approveUser: (userId: string, role: UserRole) => Promise<void>;
   rejectUser: (userId: string) => Promise<void>;
+  terminateUser: (userId: string) => Promise<void>;
+  reapproveTerminatedUser: (userId: string, role: UserRole) => Promise<void>;
   getPendingUsers: () => Promise<any[]>;
   getAllUsers: () => Promise<any[]>;
   isLoading: boolean;
@@ -248,6 +250,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const terminateUser = async (userId: string) => {
+    if (!auth || !db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
+    try {
+      const currentUser = auth.currentUser;
+      await updateDoc(doc(db, 'users', userId), {
+        status: 'terminated',
+        terminatedAt: serverTimestamp(),
+        terminatedBy: currentUser?.uid || null,
+        terminatedByName: currentUser?.displayName || currentUser?.email || 'Admin',
+        // Remove approval so they need to be re-approved to log back in
+        approvedAt: null,
+        approvedBy: null,
+        approvedByName: null,
+      });
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to terminate user');
+    }
+  };
+
+  const reapproveTerminatedUser = async (userId: string, role: UserRole) => {
+    if (!auth || !db) {
+      throw new Error('Firebase is not initialized. Please check your environment variables.');
+    }
+    try {
+      const currentUser = auth.currentUser;
+      await updateDoc(doc(db, 'users', userId), {
+        status: 'approved',
+        role,
+        approvedAt: serverTimestamp(),
+        approvedBy: currentUser?.uid || null,
+        approvedByName: currentUser?.displayName || currentUser?.email || 'Admin',
+        reapprovedAt: serverTimestamp(),
+        reapprovedBy: currentUser?.uid || null,
+        reapprovedByName: currentUser?.displayName || currentUser?.email || 'Admin',
+      });
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to re-approve user');
+    }
+  };
+
   const getPendingUsers = async () => {
     if (!db) {
       throw new Error('Firebase is not initialized. Please check your environment variables.');
@@ -289,6 +333,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGithub, 
       approveUser,
       rejectUser,
+      terminateUser,
+      reapproveTerminatedUser,
       getPendingUsers,
       getAllUsers,
       isLoading 
@@ -312,6 +358,8 @@ export function useAuth() {
       signInWithGithub: async () => {},
       approveUser: async () => {},
       rejectUser: async () => {},
+      terminateUser: async () => {},
+      reapproveTerminatedUser: async () => {},
       getPendingUsers: async () => [],
       getAllUsers: async () => [],
       isLoading: true,

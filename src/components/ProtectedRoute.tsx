@@ -17,6 +17,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
         router.push('/pending-approval');
       } else if (user.status === 'rejected') {
         router.push('/account-rejected');
+      } else if (user.status === 'terminated') {
+        router.push('/account-terminated');
       }
     }
   }, [user, isLoading, router]);
