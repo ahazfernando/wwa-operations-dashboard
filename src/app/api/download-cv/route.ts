@@ -21,10 +21,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch the file from Cloudinary with proper headers
-    // For raw files uploaded with unsigned preset, they should be publicly accessible
-    // But we need to use browser-like headers to avoid being blocked
-    const response = await fetch(url, {
+    // Normalize the URL - ensure it uses the correct format for raw files
+    // Cloudinary raw files should use: https://res.cloudinary.com/{cloud_name}/raw/upload/{public_id}
+    let normalizedUrl = url;
+    
+    // If it's a secure_url from upload response, it should already be correct
+    // But if it's missing the /raw/ part for raw files, we need to fix it
+    if (normalizedUrl.includes('/image/upload/') && normalizedUrl.includes('candidate-cvs')) {
+      // This might be a raw file incorrectly using image URL format
+      normalizedUrl = normalizedUrl.replace('/image/upload/', '/raw/upload/');
+    }
+
+    // Fetch the file from Cloudinary
+    // For raw files uploaded with unsigned preset set to "Public", they should be publicly accessible
+    const response = await fetch(normalizedUrl, {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -41,7 +51,8 @@ export async function GET(request: NextRequest) {
       let errorDetails: any = {
         status: response.status,
         statusText: response.statusText,
-        url: url,
+        url: normalizedUrl,
+        originalUrl: url,
       };
       
       try {
@@ -58,16 +69,24 @@ export async function GET(request: NextRequest) {
       
       console.error('Failed to fetch from Cloudinary:', errorDetails);
       
-      // If it's a 401, the file might be private or require authentication
-      if (response.status === 401) {
+      // If it's a 401, provide more helpful error message
+      if (response.status === 401 || response.status === 403) {
         return NextResponse.json(
           { 
             error: 'File access denied. The CV file may be private or require authentication.',
-            message: 'The CV file cannot be accessed. Please check Cloudinary settings to ensure the file is publicly accessible.',
+            message: 'The CV file cannot be accessed. Please check Cloudinary settings: 1) Ensure the upload preset "www-dashboard" has "Access control" set to "Public", 2) Check that "Resource type" allows "Raw" files, 3) Verify the file was uploaded with the correct preset.',
             status: response.status,
-            statusText: response.statusText
+            statusText: response.statusText,
+            troubleshooting: {
+              presetName: 'www-dashboard',
+              requiredSettings: [
+                'Access control: Public',
+                'Resource type: Raw (or Auto)',
+                'Signing mode: Unsigned (for client uploads)'
+              ]
+            }
           },
-          { status: 401 }
+          { status: response.status }
         );
       }
       
@@ -119,3 +138,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+

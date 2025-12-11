@@ -908,6 +908,11 @@ const Profile: React.FC = () => {
     formData.append('file', file)
     formData.append('upload_preset', uploadPreset)
     
+    // Add resource_type to formData (required for raw files to avoid 401 errors)
+    if (resourceType === 'raw') {
+      formData.append('resource_type', 'raw')
+    }
+    
     // Add folder if specified
     if (folder) {
       formData.append('folder', folder)

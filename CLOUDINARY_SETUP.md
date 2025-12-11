@@ -92,3 +92,29 @@ CLOUDINARY_API_SECRET=ucTlpiqpDgn9_8K_XVKGPjmZXhk
   - For images: jpg, jpeg, png, gif, webp
   - For documents: pdf
 
+- **"File access denied" or 401 Unauthorized when downloading CVs**:
+  - **IMPORTANT**: The "Resource type" is NOT a preset setting - it's determined by the upload API endpoint used in the code (`/raw/upload` for PDFs). The issue is likely with access control settings.
+  - **Step-by-step fix**:
+    1. Go to Cloudinary Console → Settings → Upload → Upload presets
+    2. Click on your preset (e.g., `www-dashboard`)
+    3. Click on the **"Optimize and Deliver"** tab in the left sidebar (NOT "General")
+    4. In the **"Optimize and Deliver"** section, check:
+       - **"Access control"**: Must be set to **"Public"** (this is the most important setting!)
+       - **"Delivery type"**: Should be "Upload"
+       - **"Allowed formats"**: This field is in the same "Optimize and Deliver" section. You need to:
+         - Click in the **"Allowed formats"** field
+         - Type: `pdf, jpg, jpeg, png, gif, webp` (comma-separated list)
+         - OR leave it empty to allow all formats (recommended if you upload both images and PDFs)
+    5. Go back to **"General"** tab and verify:
+       - **"Signing mode"**: Should be **"Unsigned"** (for client-side uploads)
+    6. Click **"Save"** at the top right to apply changes
+  - **If files were already uploaded**: Files uploaded BEFORE fixing these settings may still be inaccessible. You have two options:
+    - **Option 1 (Recommended)**: Re-upload the CV files after fixing the preset
+    - **Option 2**: Manually change access mode of existing files:
+      1. Go to Media Library
+      2. Find the CV file (look in the `candidate-cvs` folder)
+      3. Click on it to open details
+      4. In the file details panel, look for "Access mode" or "Access control"
+      5. Change it to **"Public"**
+      6. Click **"Save"** or **"Update"**
+
