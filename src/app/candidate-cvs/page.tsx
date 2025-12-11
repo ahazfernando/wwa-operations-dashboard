@@ -11,18 +11,16 @@ const DashboardLayout = dynamic(() => import("@/components/DashboardLayout").the
   ssr: false,
 });
 
-const RecruitmentLeads = dynamic(() => import("@/pages/RecruitmentLeads"), {
+const CandidateCVs = dynamic(() => import("@/pages/CandidateCVs"), {
   ssr: false,
 });
 
-export default function RecruitmentLeadsPage() {
+export default function CandidateCVsPage() {
   return (
     <ProtectedRoute>
       <DashboardLayout>
-        <RecruitmentLeads />
+        <CandidateCVs />
       </DashboardLayout>
     </ProtectedRoute>
   );
 }
-
-
