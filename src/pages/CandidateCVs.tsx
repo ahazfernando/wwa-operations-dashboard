@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   Plus, 
   Edit, 
@@ -43,6 +44,7 @@ import {
   Clock,
   AlertCircle,
   UserCheck,
+  Bell,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -61,7 +63,9 @@ import {
   updateCandidateCV,
   deleteCandidateCV,
   getCandidateCVsAnalytics,
-  subscribeToCandidateCVs
+  subscribeToCandidateCVs,
+  addCandidateNote,
+  deleteCandidateNote
 } from '@/lib/candidate-cvs';
 import { CandidateAnalytics } from '@/types/candidate-cv';
 
@@ -130,19 +134,33 @@ const CandidateCVs = () => {
 
   // Check if user is admin
   const isAdmin = user?.role === 'admin';
+  const [activeTab, setActiveTab] = useState<'all' | 'assigned'>(isAdmin ? 'all' : 'assigned');
+  const [newNote, setNewNote] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
 
   // Load candidates
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!user) return;
 
     const loadCandidates = async () => {
       try {
         setLoading(true);
-        const fetchedCandidates = await getAllCandidateCVs(cleanFilters(true));
+        let fetchedCandidates = await getAllCandidateCVs(cleanFilters(true));
+        
+        // Filter by assigned resumes if on assigned tab and user is not admin
+        if (activeTab === 'assigned' && user) {
+          fetchedCandidates = fetchedCandidates.filter(
+            candidate => candidate.assignedTo === user.id
+          );
+        }
+        
         setCandidates(fetchedCandidates);
         
-        const analyticsData = await getCandidateCVsAnalytics();
-        setAnalytics(analyticsData);
+        // Only load analytics for admins
+        if (isAdmin) {
+          const analyticsData = await getCandidateCVsAnalytics();
+          setAnalytics(analyticsData);
+        }
       } catch (error) {
         console.error('Error loading candidates:', error);
         toast({
@@ -156,18 +174,25 @@ const CandidateCVs = () => {
     };
 
     loadCandidates();
-  }, [filters, isAdmin, searchQuery]);
+  }, [filters, isAdmin, searchQuery, activeTab, user]);
 
   // Subscribe to real-time updates
   useEffect(() => {
-    if (!isAdmin || !user) return;
+    if (!user) return;
 
     const unsubscribe = subscribeToCandidateCVs((updatedCandidates) => {
-      setCandidates(updatedCandidates);
+      // Filter by assigned resumes if on assigned tab and user is not admin
+      let filtered = updatedCandidates;
+      if (activeTab === 'assigned') {
+        filtered = updatedCandidates.filter(
+          candidate => candidate.assignedTo === user.id
+        );
+      }
+      setCandidates(filtered);
     }, cleanFilters(false));
 
     return () => unsubscribe();
-  }, [filters, isAdmin, user]);
+  }, [filters, isAdmin, user, activeTab]);
 
   // Load users for recruiter assignment
   useEffect(() => {
@@ -538,23 +563,68 @@ const CandidateCVs = () => {
 
   const hasActiveFilters = Object.values(filters).some(v => v !== '') || searchQuery !== '';
 
-  if (!isAdmin) {
-    return (
-      <div className="space-y-6">
-        <Card className="border-red-500/50 bg-red-50 dark:bg-red-950/20">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-800 dark:text-red-200">
-              <AlertCircle className="h-5 w-5" />
-              Access Denied
-            </CardTitle>
-            <CardDescription className="text-red-700 dark:text-red-300">
-              Only administrators can access Candidate CVs.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
+  // Handle adding a note
+  const handleAddNote = async () => {
+    if (!selectedCandidate || !user || !newNote.trim()) return;
+
+    try {
+      setAddingNote(true);
+      await addCandidateNote(
+        selectedCandidate.id,
+        newNote.trim(),
+        user.id,
+        user.name || 'Unknown'
+      );
+      setNewNote('');
+      toast({
+        title: 'Success',
+        description: 'Note added successfully',
+      });
+      
+      // Refresh the selected candidate
+      const updated = await getAllCandidateCVs();
+      const updatedCandidate = updated.find(c => c.id === selectedCandidate.id);
+      if (updatedCandidate) {
+        setSelectedCandidate(updatedCandidate);
+      }
+    } catch (error: any) {
+      console.error('Error adding note:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to add note',
+        variant: 'destructive',
+      });
+    } finally {
+      setAddingNote(false);
+    }
+  };
+
+  // Handle deleting a note
+  const handleDeleteNote = async (noteId: string) => {
+    if (!selectedCandidate || !user) return;
+
+    try {
+      await deleteCandidateNote(selectedCandidate.id, noteId);
+      toast({
+        title: 'Success',
+        description: 'Note deleted successfully',
+      });
+      
+      // Refresh the selected candidate
+      const updated = await getAllCandidateCVs();
+      const updatedCandidate = updated.find(c => c.id === selectedCandidate.id);
+      if (updatedCandidate) {
+        setSelectedCandidate(updatedCandidate);
+      }
+    } catch (error: any) {
+      console.error('Error deleting note:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete note',
+        variant: 'destructive',
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -563,18 +633,52 @@ const CandidateCVs = () => {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Candidate CVs</h1>
           <p className="text-muted-foreground mt-1">
-            Manage potential employee CVs for recruitment
+            {isAdmin 
+              ? 'Manage potential employee CVs for recruitment'
+              : 'View your assigned candidate CVs'}
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setOpen(true); }}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Candidate
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => { resetForm(); setOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Candidate
+          </Button>
+        )}
       </div>
 
-      {/* Analytics Cards */}
-      {analytics && (
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'all' | 'assigned')}>
+        <TabsList>
+          {isAdmin && (
+            <TabsTrigger value="all">
+              All Resumes
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="assigned">
+            Assigned Resumes
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {/* Analytics Cards - Only show for admins */}
+      {isAdmin && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {loading && !analytics ? (
+            // Skeleton for analytics cards
+            Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i} className="group relative overflow-hidden border-2 border-blue-500/20 bg-gradient-to-br from-blue-500/5 via-blue-500/5 to-transparent">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 relative z-10">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-5 w-5 rounded-xl" />
+                </CardHeader>
+                <CardContent className="relative z-10">
+                  <Skeleton className="h-10 w-16 mb-2" />
+                  <Skeleton className="h-4 w-32" />
+                </CardContent>
+              </Card>
+            ))
+          ) : analytics ? (
+            <>
           <Card className="group relative overflow-hidden border-2 border-blue-500/20 bg-gradient-to-br from-blue-500/5 via-blue-500/5 to-transparent hover:border-blue-500/40 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-500/20 hover:-translate-y-1">
             <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-all duration-500" />
@@ -663,10 +767,13 @@ const CandidateCVs = () => {
               </p>
             </CardContent>
           </Card>
+            </>
+          ) : null}
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters - Only show for admins */}
+      {isAdmin && (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -691,7 +798,18 @@ const CandidateCVs = () => {
             </div>
           </div>
         </CardHeader>
-        {showFilters && (
+        {loading && showFilters ? (
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        ) : showFilters && (
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-2">
@@ -786,6 +904,7 @@ const CandidateCVs = () => {
           </CardContent>
         )}
       </Card>
+      )}
 
       {/* Candidates Table */}
       <Card>
@@ -794,9 +913,59 @@ const CandidateCVs = () => {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-center py-8">
-              <Clock className="h-8 w-8 mx-auto animate-spin text-muted-foreground" />
-              <p className="text-muted-foreground mt-2">Loading candidates...</p>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Candidate Name</TableHead>
+                    <TableHead>Job Role</TableHead>
+                    <TableHead>Experience</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell>
+                        <Skeleton className="h-4 w-16" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-3 w-40" />
+                          <Skeleton className="h-3 w-28" />
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Skeleton className="h-8 w-8 rounded-md ml-auto" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : candidates.length === 0 ? (
             <div className="text-center py-12">
@@ -870,10 +1039,12 @@ const CandidateCVs = () => {
                               <Eye className="h-4 w-4 mr-2" />
                               View
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleEdit(candidate)}>
-                              <Edit className="h-4 w-4 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
+                            {isAdmin && (
+                              <DropdownMenuItem onClick={() => handleEdit(candidate)}>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               onClick={() => handleDownloadCV(
                                 candidate.cvUrl,
@@ -883,13 +1054,15 @@ const CandidateCVs = () => {
                               <Download className="h-4 w-4 mr-2" />
                               Download CV
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => setDeleteConfirm(candidate.id)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
+                            {isAdmin && (
+                              <DropdownMenuItem
+                                onClick={() => setDeleteConfirm(candidate.id)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -1389,10 +1562,14 @@ const CandidateCVs = () => {
 
               <div className="overflow-y-auto max-h-[calc(95vh-180px)] px-6 py-4 scrollbar-hide">
                 <Tabs defaultValue="details" className="w-full">
-                  <TabsList className="grid w-full grid-cols-2 mb-6 bg-muted/50">
+                  <TabsList className="grid w-full grid-cols-3 mb-6 bg-muted/50">
                     <TabsTrigger value="details" className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
                       Details
+                    </TabsTrigger>
+                    <TabsTrigger value="notes" className="flex items-center gap-2">
+                      <Bell className="h-4 w-4" />
+                      Notes
                     </TabsTrigger>
                     <TabsTrigger value="cv" className="flex items-center gap-2">
                       <Download className="h-4 w-4" />
@@ -1531,7 +1708,7 @@ const CandidateCVs = () => {
                       </CardContent>
                     </Card>
 
-                    {/* Notes Section */}
+                    {/* Legacy Notes Section */}
                     {selectedCandidate.notes && (
                       <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
                         <CardHeader className="pb-3">
@@ -1549,6 +1726,107 @@ const CandidateCVs = () => {
                         </CardContent>
                       </Card>
                     )}
+                  </TabsContent>
+
+                  <TabsContent value="notes" className="space-y-6 mt-0">
+                    {/* Add Note Section */}
+                    <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                          <Plus className="h-4 w-4 text-primary" />
+                          Add Note
+                        </CardTitle>
+                        <CardDescription>
+                          Add a note about this candidate. The note will be visible to all team members.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <Textarea
+                          placeholder="Enter your note here..."
+                          value={newNote}
+                          onChange={(e) => setNewNote(e.target.value)}
+                          rows={4}
+                          className="resize-none"
+                        />
+                        <Button
+                          onClick={handleAddNote}
+                          disabled={!newNote.trim() || addingNote}
+                          className="w-full sm:w-auto"
+                        >
+                          {addingNote ? (
+                            <>
+                              <Clock className="h-4 w-4 mr-2 animate-spin" />
+                              Adding...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="h-4 w-4 mr-2" />
+                              Add Note
+                            </>
+                          )}
+                        </Button>
+                      </CardContent>
+                    </Card>
+
+                    {/* Notes List */}
+                    <Card className="border-2 border-primary/10 bg-gradient-to-br from-card to-card/50">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+                          <Bell className="h-4 w-4 text-primary" />
+                          Notes History
+                        </CardTitle>
+                        <CardDescription>
+                          {selectedCandidate.candidateNotes && selectedCandidate.candidateNotes.length > 0
+                            ? `${selectedCandidate.candidateNotes.length} note${selectedCandidate.candidateNotes.length !== 1 ? 's' : ''}`
+                            : 'No notes yet'}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {selectedCandidate.candidateNotes && selectedCandidate.candidateNotes.length > 0 ? (
+                          <div className="space-y-4">
+                            {selectedCandidate.candidateNotes
+                              .sort((a, b) => b.addedAt.getTime() - a.addedAt.getTime())
+                              .map((note) => (
+                                <div
+                                  key={note.id}
+                                  className="p-4 rounded-lg bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors"
+                                >
+                                  <div className="flex items-start justify-between gap-4 mb-2">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <User className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm font-semibold">{note.addedByName}</span>
+                                        <span className="text-xs text-muted-foreground">
+                                          • {format(note.addedAt, 'MMM dd, yyyy HH:mm')}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90">
+                                        {note.note}
+                                      </p>
+                                    </div>
+                                    {(isAdmin || note.addedBy === user?.id) && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        onClick={() => handleDeleteNote(note.id)}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8">
+                            <Bell className="h-12 w-12 mx-auto text-muted-foreground mb-3 opacity-50" />
+                            <p className="text-sm text-muted-foreground">No notes have been added yet</p>
+                            <p className="text-xs text-muted-foreground mt-1">Add a note above to get started</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   </TabsContent>
 
                   <TabsContent value="cv" className="space-y-6 mt-0">

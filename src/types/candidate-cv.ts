@@ -27,6 +27,14 @@ export type ExperienceLevel =
   | 'Senior (5-10 years)' 
   | 'Expert (10+ years)';
 
+export interface CandidateNote {
+  id: string;
+  note: string;
+  addedBy: string; // User ID
+  addedByName: string; // User name for display
+  addedAt: Date;
+}
+
 export interface CandidateCV {
   id: string;
   candidateId: string; // Auto-generated ID like "CV001"
@@ -38,7 +46,8 @@ export interface CandidateCV {
   location?: string;
   cvUrl: string; // URL to uploaded CV file
   cvFileName?: string;
-  notes?: string;
+  notes?: string; // Legacy notes field (kept for backward compatibility)
+  candidateNotes?: CandidateNote[]; // Array of notes with author and timestamp
   status: CandidateStatus;
   priority: CandidatePriority;
   tags: string[];
@@ -63,7 +72,14 @@ export interface FirestoreCandidateCV {
   location?: string;
   cvUrl: string;
   cvFileName?: string;
-  notes?: string;
+  notes?: string; // Legacy notes field
+  candidateNotes?: Array<{
+    id: string;
+    note: string;
+    addedBy: string;
+    addedByName: string;
+    addedAt: any; // Firestore Timestamp
+  }>;
   status: CandidateStatus;
   priority: CandidatePriority;
   tags: string[];

@@ -317,6 +317,9 @@ const RecruitmentLeads = () => {
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [employeeDropdownOpen, setEmployeeDropdownOpen] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const [sortOrder, setSortOrder] = useState<'latest' | 'oldest'>('latest');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Configure sensors for drag and drop
   const sensors = useSensors(
@@ -821,6 +824,30 @@ const RecruitmentLeads = () => {
     return matchesSearch && matchesFilters && matchesDateRange;
   });
 
+  // Sort leads based on sortOrder
+  const sortedLeads = [...filteredLeads].sort((a, b) => {
+    // Use createdAt if available, otherwise use dateOfRecording
+    const dateA = a.createdAt?.getTime() || new Date(a.dateOfRecording).getTime();
+    const dateB = b.createdAt?.getTime() || new Date(b.dateOfRecording).getTime();
+    
+    if (sortOrder === 'latest') {
+      return dateB - dateA; // Latest first (descending)
+    } else {
+      return dateA - dateB; // Oldest first (ascending)
+    }
+  });
+
+  // Pagination
+  const totalPages = Math.ceil(sortedLeads.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedLeads = sortedLeads.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filters, dateRange, sortOrder]);
+
   const clearFilters = () => {
     setSearchQuery('');
     setFilters({
@@ -830,6 +857,7 @@ const RecruitmentLeads = () => {
       assignedTo: '',
     });
     setDateRange(undefined);
+    setCurrentPage(1);
   };
 
   const hasActiveFilters = searchQuery !== '' || Object.values(filters).some(value => value !== '') || dateRange !== undefined;
@@ -1462,7 +1490,7 @@ const RecruitmentLeads = () => {
                 className="pl-12 h-12 text-base shadow-lg border-2 border-primary/20 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all duration-300 bg-background/80 backdrop-blur-sm relative z-10"
               />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="date-range" className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary" />
@@ -1579,6 +1607,21 @@ const RecruitmentLeads = () => {
               <div className="space-y-2">
                 <Label className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  Sort Order
+                </Label>
+                <Select value={sortOrder} onValueChange={(value: 'latest' | 'oldest') => setSortOrder(value)}>
+                  <SelectTrigger className="h-11 border-2 border-primary/20 shadow-md hover:border-primary/50 hover:shadow-lg transition-all duration-300 bg-background/80 backdrop-blur-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-2 shadow-xl">
+                    <SelectItem value="latest">Latest to First</SelectItem>
+                    <SelectItem value="oldest">Oldest to First</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" />
                   View Mode
                 </Label>
                 <div className="flex gap-2 p-1.5 bg-gradient-to-r from-muted/50 via-muted/30 to-muted/50 rounded-xl border border-primary/20 shadow-md">
@@ -1655,7 +1698,7 @@ const RecruitmentLeads = () => {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredLeads.map((lead, index) => (
+                    paginatedLeads.map((lead, index) => (
                       <TableRow 
                         key={lead.id} 
                         className="group hover:bg-gradient-to-r hover:from-primary/5 hover:via-primary/5 hover:to-transparent transition-all duration-300 cursor-pointer border-b border-primary/5 hover:border-primary/20 hover:shadow-md"
@@ -1741,6 +1784,65 @@ const RecruitmentLeads = () => {
                   )}
                 </TableBody>
               </Table>
+              
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-6 pt-6 border-t border-primary/20">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {startIndex + 1} to {Math.min(endIndex, sortedLeads.length)} of {sortedLeads.length} leads
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="border-2 border-primary/20 hover:border-primary/50 transition-all"
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(10, totalPages) }, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 10) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= totalPages - 4) {
+                          pageNum = totalPages - 9 + i;
+                        } else {
+                          pageNum = currentPage - 4 + i;
+                        }
+                        
+                        return (
+                          <Button
+                            key={pageNum}
+                            variant={currentPage === pageNum ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={`min-w-[2.5rem] border-2 transition-all ${
+                              currentPage === pageNum
+                                ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 border-primary shadow-lg'
+                                : 'border-primary/20 hover:border-primary/50'
+                            }`}
+                          >
+                            {pageNum}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                      className="border-2 border-primary/20 hover:border-primary/50 transition-all"
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

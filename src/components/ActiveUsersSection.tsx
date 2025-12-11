@@ -308,22 +308,27 @@ export const ActiveUsersSection = () => {
   };
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid gap-4 sm:gap-6 md:grid-cols-2">
       {/* Active Users Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-green-600" />
+      <Card className="border-border/50 transition-smooth overflow-hidden group">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <CardHeader className="pb-4 sm:pb-6 bg-gradient-to-br from-card to-card/50">
+          <CardTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10">
+              <Activity className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-500" />
+            </div>
             Active Users
           </CardTitle>
-          <CardDescription>Users currently clocked in</CardDescription>
+          <CardDescription className="text-xs sm:text-sm mt-1.5 hidden sm:block text-muted-foreground">
+            Users currently clocked in
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-0">
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 p-3 border rounded-lg">
-                  <Skeleton className="h-10 w-10 rounded-full" />
+                <div key={i} className="flex items-center gap-3 p-3 sm:p-4 border rounded-lg">
+                  <Skeleton className="h-10 w-10 sm:h-12 sm:w-12 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-32" />
                     <Skeleton className="h-3 w-24" />
@@ -332,9 +337,12 @@ export const ActiveUsersSection = () => {
               ))}
             </div>
           ) : activeUsers.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
-              <p>No users currently clocked in</p>
+            <div className="text-center py-12 text-muted-foreground">
+              <div className="inline-flex p-4 rounded-2xl bg-emerald-500/10 mb-4">
+                <Activity className="h-8 w-8 text-emerald-500 opacity-60" />
+              </div>
+              <p className="font-medium mb-1">No users currently clocked in</p>
+              <p className="text-xs">Active users will appear here</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -345,63 +353,69 @@ export const ActiveUsersSection = () => {
                 return (
                   <div
                     key={activeUser.entryId}
-                    className="flex items-center gap-3 p-3 border rounded-lg bg-green-50 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30 transition-colors"
+                    className="group/item flex items-start gap-3 p-4 border rounded-xl bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent hover:from-emerald-500/15 hover:via-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/30 transition-smooth"
                   >
-                    <div className="relative">
-                      <Avatar className="h-10 w-10 border-2 border-green-500">
+                    <div className="relative flex-shrink-0">
+                      <div className="absolute inset-0 bg-emerald-500/20 rounded-full blur-lg animate-pulse" />
+                      <Avatar className="relative h-12 w-12 sm:h-14 sm:w-14 border-2 border-emerald-500/50 ring-2 ring-emerald-500/20">
                         <AvatarImage 
                           src={profilePhotos[activeUser.userId] || undefined} 
                           alt={activeUser.userName}
                           className="object-cover"
                         />
-                        <AvatarFallback className="bg-green-500 text-white font-medium">
+                        <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white font-semibold">
                           {getInitials(activeUser.userName)}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full bg-green-500 border-2 border-white dark:border-gray-900 animate-pulse" />
+                      <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-emerald-500 border-2 border-card animate-pulse ring-2 ring-emerald-500/30" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">
+                      <p className="font-medium text-sm sm:text-base truncate mb-0.5">
                         {activeUser.userName}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-xs sm:text-sm text-muted-foreground truncate mb-2">
                         {activeUser.userEmail}
                       </p>
-                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 flex-wrap">
                         {busyStatus[activeUser.userId] && (
-                          <Badge variant="destructive" className="text-xs">
-                            <AlertCircle className="h-3 w-3 mr-1" />
+                          <Badge variant="destructive" className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5">
+                            <AlertCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
                             Busy
                           </Badge>
                         )}
                         {isAdmin && (
                           <>
-                            <Badge variant="outline" className="text-xs">
-                              <Clock className="h-3 w-3 mr-1" />
-                              {formatTime(activeUser.clockInTime)}
+                            <Badge variant="outline" className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5">
+                              <Clock className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
+                              <span className="hidden sm:inline">{formatTime(activeUser.clockInTime)}</span>
+                              <span className="sm:hidden">{formatTime(activeUser.clockInTime).split(' ')[0]}</span>
                             </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {Math.round(hoursActive * 100) / 100}h active
+                            <span className="text-[10px] sm:text-xs text-muted-foreground">
+                              {Math.round(hoursActive * 100) / 100}h
                             </span>
                           </>
                         )}
                         {!isAdmin && (
-                          <Badge variant="outline" className="text-xs bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-300">
+                          <Badge variant="outline" className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-300">
                             Active
                           </Badge>
                         )}
                       </div>
                       {userTasks[activeUser.userId] && (
-                        <div className="mt-2 pt-2 border-t border-green-200 dark:border-green-800">
-                          <div className="flex items-start gap-2">
-                            <CheckSquare className="h-3 w-3 mt-0.5 text-green-600 flex-shrink-0" />
+                        <div className="mt-3 pt-3 border-t border-emerald-500/20">
+                          <div className="flex items-start gap-2.5">
+                            <div className="p-1 rounded-lg bg-emerald-500/20 flex-shrink-0">
+                              <CheckSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-500" />
+                            </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-green-700 dark:text-green-300 truncate">
+                              <p className="text-xs sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400 truncate mb-1">
                                 {userTasks[activeUser.userId]?.name}
                               </p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {userTasks[activeUser.userId]?.description || 'No description'}
-                              </p>
+                              {userTasks[activeUser.userId]?.description && (
+                                <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2 sm:line-clamp-1">
+                                  {userTasks[activeUser.userId]?.description}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -416,20 +430,25 @@ export const ActiveUsersSection = () => {
       </Card>
 
       {/* Recent Clock Outs Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LogOut className="h-5 w-5 text-blue-600" />
+      <Card className="border-border/50 transition-smooth overflow-hidden group">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <CardHeader className="pb-4 sm:pb-6 bg-gradient-to-br from-card to-card/50">
+          <CardTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold">
+            <div className="p-1.5 rounded-lg bg-blue-500/10">
+              <LogOut className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500" />
+            </div>
             Recent Clock Outs
           </CardTitle>
-          <CardDescription>Users who clocked out recently</CardDescription>
+          <CardDescription className="text-xs sm:text-sm mt-1.5 hidden sm:block text-muted-foreground">
+            Users who clocked out recently
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-0">
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 p-3 border rounded-lg">
-                  <Skeleton className="h-10 w-10 rounded-full" />
+                <div key={i} className="flex items-center gap-3 p-3 sm:p-4 border rounded-lg">
+                  <Skeleton className="h-10 w-10 sm:h-12 sm:w-12 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-32" />
                     <Skeleton className="h-3 w-24" />
@@ -438,9 +457,12 @@ export const ActiveUsersSection = () => {
               ))}
             </div>
           ) : recentClockOuts.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <LogOut className="h-12 w-12 mx-auto mb-2 opacity-50" />
-              <p>No recent clock outs today</p>
+            <div className="text-center py-12 text-muted-foreground">
+              <div className="inline-flex p-4 rounded-2xl bg-blue-500/10 mb-4">
+                <LogOut className="h-8 w-8 text-blue-500 opacity-60" />
+              </div>
+              <p className="font-medium mb-1">No recent clock outs today</p>
+              <p className="text-xs">Recent clock outs will appear here</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -451,35 +473,39 @@ export const ActiveUsersSection = () => {
                 return (
                   <div
                     key={recent.entryId}
-                    className="flex items-center gap-3 p-3 border rounded-lg hover:bg-accent transition-colors"
+                    className="group/item flex items-start gap-3 p-4 border rounded-xl bg-gradient-to-r from-blue-500/10 via-blue-500/5 to-transparent hover:from-blue-500/15 hover:via-blue-500/10 border-blue-500/20 hover:border-blue-500/30 transition-smooth"
                   >
-                    <Avatar className="h-10 w-10 border-2 border-blue-500">
-                      <AvatarImage 
-                        src={profilePhotos[recent.userId] || undefined} 
-                        alt={recent.userName}
-                        className="object-cover"
-                      />
-                      <AvatarFallback className="bg-blue-500 text-white font-medium">
-                        {getInitials(recent.userName)}
-                      </AvatarFallback>
-                    </Avatar>
+                    <div className="relative flex-shrink-0">
+                      <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-lg" />
+                      <Avatar className="relative h-12 w-12 sm:h-14 sm:w-14 border-2 border-blue-500/50 ring-2 ring-blue-500/20">
+                        <AvatarImage 
+                          src={profilePhotos[recent.userId] || undefined} 
+                          alt={recent.userName}
+                          className="object-cover"
+                        />
+                        <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-600 text-white font-semibold">
+                          {getInitials(recent.userName)}
+                        </AvatarFallback>
+                      </Avatar>
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">
+                      <p className="font-medium text-sm sm:text-base truncate mb-0.5">
                         {recent.userName}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-xs sm:text-sm text-muted-foreground truncate mb-2">
                         {recent.userEmail}
                       </p>
                       {isAdmin && (
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <Badge variant="outline" className="text-xs">
-                            <LogOut className="h-3 w-3 mr-1" />
-                            {formatTime(recent.clockOutTime)}
+                        <div className="flex items-center gap-1.5 sm:gap-2 mt-1.5 flex-wrap">
+                          <Badge variant="outline" className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5">
+                            <LogOut className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
+                            <span className="hidden sm:inline">{formatTime(recent.clockOutTime)}</span>
+                            <span className="sm:hidden">{formatTime(recent.clockOutTime).split(' ')[0]}</span>
                           </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {Math.round(hoursWorked * 100) / 100}h worked
+                          <span className="text-[10px] sm:text-xs text-muted-foreground">
+                            {Math.round(hoursWorked * 100) / 100}h
                           </span>
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-[10px] sm:text-xs text-muted-foreground">
                             {formatDistanceToNow(recent.clockOutTime, {
                               addSuffix: true,
                             })}
@@ -487,8 +513,8 @@ export const ActiveUsersSection = () => {
                         </div>
                       )}
                       {!isAdmin && (
-                        <div className="mt-1">
-                          <span className="text-xs text-muted-foreground">
+                        <div className="mt-1.5">
+                          <span className="text-xs sm:text-sm text-muted-foreground">
                             {formatDistanceToNow(recent.clockOutTime, {
                               addSuffix: true,
                             })}
@@ -496,16 +522,20 @@ export const ActiveUsersSection = () => {
                         </div>
                       )}
                       {userTasks[recent.userId] && (
-                        <div className="mt-2 pt-2 border-t">
-                          <div className="flex items-start gap-2">
-                            <CheckSquare className="h-3 w-3 mt-0.5 text-blue-600 flex-shrink-0" />
+                        <div className="mt-3 pt-3 border-t border-blue-500/20">
+                          <div className="flex items-start gap-2.5">
+                            <div className="p-1 rounded-lg bg-blue-500/20 flex-shrink-0">
+                              <CheckSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-500" />
+                            </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-blue-700 dark:text-blue-300 truncate">
+                              <p className="text-xs sm:text-sm font-semibold text-blue-600 dark:text-blue-400 truncate mb-1">
                                 {userTasks[recent.userId]?.name}
                               </p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {userTasks[recent.userId]?.description || 'No description'}
-                              </p>
+                              {userTasks[recent.userId]?.description && (
+                                <p className="text-[10px] sm:text-xs text-muted-foreground line-clamp-2 sm:line-clamp-1">
+                                  {userTasks[recent.userId]?.description}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>

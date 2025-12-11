@@ -21,13 +21,23 @@ import {
   CandidatePriority,
   JobRole,
   ExperienceLevel,
-  CandidateAnalytics
+  CandidateAnalytics,
+  CandidateNote
 } from '@/types/candidate-cv';
 
 /**
  * Convert Firestore candidate CV to app CandidateCV
  */
 export function convertFirestoreCandidateCV(docData: any, docId: string): CandidateCV {
+  // Convert candidate notes
+  const candidateNotes: CandidateNote[] = (docData.candidateNotes || []).map((note: any) => ({
+    id: note.id || '',
+    note: note.note || '',
+    addedBy: note.addedBy || '',
+    addedByName: note.addedByName || '',
+    addedAt: note.addedAt?.toDate() || new Date(),
+  }));
+
   return {
     id: docId,
     candidateId: docData.candidateId || '',
@@ -40,6 +50,7 @@ export function convertFirestoreCandidateCV(docData: any, docId: string): Candid
     cvUrl: docData.cvUrl || '',
     cvFileName: docData.cvFileName,
     notes: docData.notes,
+    candidateNotes: candidateNotes.length > 0 ? candidateNotes : undefined,
     status: docData.status || 'New',
     priority: docData.priority || 'Medium',
     tags: docData.tags || [],
@@ -462,4 +473,80 @@ export function subscribeToCandidateCVs(
   
   return unsubscribe;
 }
+
+/**
+ * Add a note to a candidate CV
+ */
+export async function addCandidateNote(
+  candidateId: string,
+  note: string,
+  addedBy: string,
+  addedByName: string
+): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized');
+  }
+  
+  try {
+    const candidateRef = doc(db, 'candidateCVs', candidateId);
+    const candidateDoc = await getDoc(candidateRef);
+    
+    if (!candidateDoc.exists()) {
+      throw new Error('Candidate CV not found');
+    }
+    
+    const currentData = candidateDoc.data();
+    const existingNotes = currentData.candidateNotes || [];
+    
+    const newNote = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      note: note.trim(),
+      addedBy,
+      addedByName,
+      addedAt: Timestamp.now(),
+    };
+    
+    await updateDoc(candidateRef, {
+      candidateNotes: [...existingNotes, newNote],
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error adding candidate note:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a note from a candidate CV
+ */
+export async function deleteCandidateNote(
+  candidateId: string,
+  noteId: string
+): Promise<void> {
+  if (!db) {
+    throw new Error('Firebase is not initialized');
+  }
+  
+  try {
+    const candidateRef = doc(db, 'candidateCVs', candidateId);
+    const candidateDoc = await getDoc(candidateRef);
+    
+    if (!candidateDoc.exists()) {
+      throw new Error('Candidate CV not found');
+    }
+    
+    const currentData = candidateDoc.data();
+    const existingNotes = currentData.candidateNotes || [];
+    const updatedNotes = existingNotes.filter((note: any) => note.id !== noteId);
+    
+    await updateDoc(candidateRef, {
+      candidateNotes: updatedNotes,
+      updatedAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error deleting candidate note:', error);
+    throw error;
+  }
+}
+
 

@@ -16,14 +16,15 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, Timestamp, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
 import { UserProfileViewDialog } from '@/components/UserProfileViewDialog';
-import { CheckCircle2, XCircle, MapPin, Edit, Loader2, Clock, Trash2 } from 'lucide-react';
+import { CheckCircle2, XCircle, MapPin, Edit, Loader2, Clock, Trash2, MoreVertical, Eye } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 const Settings = () => {
-  const { approveUser, rejectUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
+  const { approveUser, rejectUser, terminateUser, reapproveTerminatedUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
   const router = useRouter();
   const [pendingUsers, setPendingUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -112,6 +113,48 @@ const Settings = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to reject user',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleTerminate = async (userId: string) => {
+    try {
+      setProcessing(userId);
+      await terminateUser(userId);
+      toast({
+        title: 'User Terminated',
+        description: 'User has been moved to Past Employees. They will need approval to log back in.',
+      });
+      await loadAllUsers();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to terminate user',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleReapprove = async (userId: string) => {
+    const user = allUsers.find(u => u.id === userId);
+    const role = user?.role || 'itteam';
+    try {
+      setProcessing(userId);
+      await reapproveTerminatedUser(userId, role as UserRole);
+      toast({
+        title: 'User Re-approved',
+        description: 'User has been re-approved and can now access the system.',
+      });
+      await loadAllUsers();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to re-approve user',
         variant: 'destructive',
       });
     } finally {
@@ -782,8 +825,13 @@ const Settings = () => {
               </div>
             </div>
           ) : (() => {
-            // Filter users based on search query and job role
+            // Filter users based on search query and job role, excluding terminated users
             const filteredUsers = allUsers.filter((user) => {
+              // Exclude terminated users from main table
+              if (user.status === 'terminated') {
+                return false;
+              }
+              
               // Search filter
               if (searchQuery.trim()) {
                 const query = searchQuery.toLowerCase();
@@ -822,6 +870,7 @@ const Settings = () => {
                       <TableHead>Profile Completed</TableHead>
                       <TableHead>Registered</TableHead>
                       <TableHead>Approved By</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -915,9 +964,167 @@ const Settings = () => {
                       <TableCell className="text-sm text-muted-foreground">
                         {user.approvedByName || user.approvedBy || 'N/A'}
                       </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setViewingProfileUserId(user.id);
+                                setViewingProfileUserName(userName);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Profile
+                            </DropdownMenuItem>
+                            {user.status === 'approved' && (
+                              <DropdownMenuItem
+                                onClick={() => handleTerminate(user.id)}
+                                disabled={processing === user.id}
+                                className="cursor-pointer text-destructive focus:text-destructive"
+                              >
+                                {processing === user.id ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Terminating...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Terminate
+                                  </>
+                                )}
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
                     </TableRow>
                     );
                   })}
+                  </TableBody>
+                </Table>
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
+
+      {/* Past Employee Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Past Employees</CardTitle>
+          <CardDescription>
+            Terminated employees. They require approval to log back into the system.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {usersLoading ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-7 gap-4 pb-2 border-b">
+                    {Array.from({ length: 7 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-7 gap-4 py-2">
+                      {Array.from({ length: 7 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (() => {
+            const terminatedUsers = allUsers.filter((user) => user.status === 'terminated');
+            
+            // Apply search filter to terminated users
+            const filteredTerminatedUsers = terminatedUsers.filter((user) => {
+              if (searchQuery.trim()) {
+                const query = searchQuery.toLowerCase();
+                const userName = (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '').toLowerCase();
+                const userEmail = (user.email || '').toLowerCase();
+                const employeeId = (user.employeeId || '').toLowerCase();
+                
+                if (!userName.includes(query) && !userEmail.includes(query) && !employeeId.includes(query)) {
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            return filteredTerminatedUsers.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No terminated employees found
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Employee ID</TableHead>
+                      <TableHead>Job Role</TableHead>
+                      <TableHead>Terminated By</TableHead>
+                      <TableHead>Terminated Date</TableHead>
+                      <TableHead>Registered</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredTerminatedUsers.map((user) => {
+                      const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+                      return (
+                        <TableRow key={user.id}>
+                          <TableCell className="font-medium">
+                            {userName}
+                          </TableCell>
+                          <TableCell>{user.employeeId || 'N/A'}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {user.role === 'admin' ? 'Admin' : user.role === 'operationsstaff' ? 'Operations Staff' : 'IT Team'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {user.terminatedByName || user.terminatedBy || 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {user.terminatedAt ? formatDate(user.terminatedAt) : 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {formatDate(user.createdAt)}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleReapprove(user.id)}
+                              disabled={processing === user.id}
+                            >
+                              {processing === user.id ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Re-approving...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                                  Re-approve
+                                </>
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
