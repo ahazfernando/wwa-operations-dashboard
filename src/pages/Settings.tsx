@@ -16,7 +16,8 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, updateDoc, getDoc, collection, query, where, getDocs, Timestamp, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { storage, db } from '@/lib/firebase';
 import { UserProfileViewDialog } from '@/components/UserProfileViewDialog';
-import { CheckCircle2, XCircle, MapPin, Edit, Loader2, Clock, Trash2, MoreVertical, Eye } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { CheckCircle2, XCircle, MapPin, Edit, Loader2, Clock, Trash2, MoreVertical, Eye, Grid3x3, List, LayoutGrid, Users } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
@@ -53,6 +54,8 @@ const Settings = () => {
   const [deleteLocationId, setDeleteLocationId] = useState<string | null>(null);
   const [deletingLocation, setDeletingLocation] = useState(false);
   const [usersWithTimeEntryLocations, setUsersWithTimeEntryLocations] = useState<Record<string, { hasLocation: boolean; latestLocation?: { lat: number; lng: number } }>>({});
+  const [userViewMode, setUserViewMode] = useState<'table' | 'card'>('table');
+  const [userProfilePhotos, setUserProfilePhotos] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadPendingUsers();
@@ -416,6 +419,45 @@ const Settings = () => {
     }
   };
 
+  const loadUserProfilePhotos = async (users: any[]) => {
+    if (!db) return;
+    
+    try {
+      const photoPromises = users.map(async (user) => {
+        try {
+          const profileDoc = await getDoc(doc(db, 'profiles', user.id));
+          if (profileDoc.exists()) {
+            const data = profileDoc.data();
+            return { userId: user.id, photo: data.profilePhoto || null };
+          }
+        } catch (error) {
+          console.error(`Error loading profile photo for user ${user.id}:`, error);
+        }
+        return { userId: user.id, photo: null };
+      });
+      
+      const photoResults = await Promise.all(photoPromises);
+      const newPhotos: Record<string, string> = {};
+      photoResults.forEach(({ userId, photo }) => {
+        if (photo) {
+          newPhotos[userId] = photo;
+        }
+      });
+      setUserProfilePhotos(prev => ({ ...prev, ...newPhotos }));
+    } catch (error) {
+      console.error('Error loading profile photos:', error);
+    }
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   const checkUserTimeEntryLocations = async (userId: string): Promise<{ hasLocation: boolean; latestLocation?: { lat: number; lng: number } }> => {
     if (!db) return { hasLocation: false };
     
@@ -476,6 +518,9 @@ const Settings = () => {
         return bDate.getTime() - aDate.getTime();
       });
       setAllUsers(sortedUsers);
+      
+      // Load profile photos for all users
+      await loadUserProfilePhotos(sortedUsers);
       
       // Load profile completion status for all users in parallel
       const statusMap: Record<string, boolean> = {};
@@ -774,36 +819,74 @@ const Settings = () => {
         <p className="text-muted-foreground mt-1">System configuration and permissions</p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>User Management</CardTitle>
-          <CardDescription>
-            View all users, their details, and manage job contracts
-          </CardDescription>
+      <Card className="border-border/50 transition-smooth overflow-hidden group">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <CardHeader className="bg-gradient-to-br from-card to-card/50 border-b border-border/50">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+                User Management
+              </CardTitle>
+              <CardDescription className="mt-1.5">
+                View all users, their details, and manage job contracts
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
-          <div className="mb-6 flex gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <CardContent className="pt-6">
+          <div className="mb-6 flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1 group">
+              <div className="absolute inset-0 bg-primary/5 rounded-lg blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-primary z-10" />
               <Input
                 type="text"
                 placeholder="Search by name, email, or employee ID..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
+                className="pl-12 h-12 text-base border-2 border-primary/20 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all duration-300 bg-background/80 backdrop-blur-sm relative z-10"
               />
             </div>
-            <Select value={selectedJobRole} onValueChange={setSelectedJobRole}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by job role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Job Roles</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="operationsstaff">Operations Staff</SelectItem>
-                <SelectItem value="itteam">IT Team</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex gap-3">
+              <Select value={selectedJobRole} onValueChange={setSelectedJobRole}>
+                <SelectTrigger className="w-[200px] h-12 border-2 border-primary/20 hover:border-primary/50 transition-all duration-300 bg-background/80 backdrop-blur-sm">
+                  <SelectValue placeholder="Filter by job role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Job Roles</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="operationsstaff">Operations Staff</SelectItem>
+                  <SelectItem value="itteam">IT Team</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="flex items-center border-2 border-primary/20 rounded-lg overflow-hidden bg-background/80 backdrop-blur-sm">
+                <Button
+                  variant={userViewMode === 'table' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setUserViewMode('table')}
+                  className={`h-12 px-4 rounded-none border-0 transition-all duration-300 ${
+                    userViewMode === 'table'
+                      ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 shadow-lg'
+                      : 'hover:bg-primary/10'
+                  }`}
+                >
+                  <List className="h-4 w-4 mr-2" />
+                  Table
+                </Button>
+                <Button
+                  variant={userViewMode === 'card' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setUserViewMode('card')}
+                  className={`h-12 px-4 rounded-none border-0 transition-all duration-300 ${
+                    userViewMode === 'card'
+                      ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 shadow-lg'
+                      : 'hover:bg-primary/10'
+                  }`}
+                >
+                  <LayoutGrid className="h-4 w-4 mr-2" />
+                  Cards
+                </Button>
+              </div>
+            </div>
           </div>
           {usersLoading ? (
             <div className="space-y-4">
@@ -855,31 +938,37 @@ const Settings = () => {
             });
 
             return filteredUsers.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                {searchQuery || selectedJobRole !== 'all' ? 'No users found matching your filters' : 'No users found'}
-              </p>
-            ) : (
+              <div className="text-center py-12">
+                <div className="inline-flex p-4 rounded-2xl bg-primary/10 mb-4">
+                  <Users className="h-8 w-8 text-primary opacity-60" />
+                </div>
+                <p className="font-medium mb-1">No users found</p>
+                <p className="text-sm text-muted-foreground">
+                  {searchQuery || selectedJobRole !== 'all' ? 'Try adjusting your filters' : 'No users in the system'}
+                </p>
+              </div>
+            ) : userViewMode === 'table' ? (
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="border-separate border-spacing-0">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Employee ID</TableHead>
-                      <TableHead>Job Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Profile Completed</TableHead>
-                      <TableHead>Registered</TableHead>
-                      <TableHead>Approved By</TableHead>
-                      <TableHead>Actions</TableHead>
+                    <TableRow className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-b-2 border-primary/20">
+                      <TableHead className="font-bold text-foreground">Name</TableHead>
+                      <TableHead className="font-bold text-foreground">Employee ID</TableHead>
+                      <TableHead className="font-bold text-foreground">Job Role</TableHead>
+                      <TableHead className="font-bold text-foreground">Status</TableHead>
+                      <TableHead className="font-bold text-foreground">Profile Completed</TableHead>
+                      <TableHead className="font-bold text-foreground">Registered</TableHead>
+                      <TableHead className="font-bold text-foreground">Approved By</TableHead>
+                      <TableHead className="font-bold text-foreground">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredUsers.map((user) => {
+                    {filteredUsers.map((user, index) => {
                       const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
                       return (
                     <TableRow 
                       key={user.id}
-                      className="cursor-pointer hover:bg-muted/50"
+                      className="group cursor-pointer hover:bg-gradient-to-r hover:from-primary/5 hover:via-primary/5 hover:to-transparent transition-all duration-300 border-b border-border/50"
                       onClick={(e) => {
                         // Don't open profile if clicking on interactive elements
                         const target = e.target as HTMLElement;
@@ -895,11 +984,22 @@ const Settings = () => {
                         setViewingProfileUserId(user.id);
                         setViewingProfileUserName(userName);
                       }}
+                      style={{ animationDelay: `${index * 50}ms` }}
                     >
-                      <TableCell className="font-medium">
-                        {userName}
+                      <TableCell className="font-semibold group-hover:text-primary transition-colors">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10 rounded-full ring-2 ring-primary/20">
+                            <AvatarImage src={userProfilePhotos[user.id] || undefined} alt={userName} />
+                            <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold">
+                              {getInitials(userName)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span>{userName}</span>
+                        </div>
                       </TableCell>
-                      <TableCell>{user.employeeId || 'N/A'}</TableCell>
+                      <TableCell className="text-muted-foreground group-hover:text-foreground transition-colors">
+                        {user.employeeId || 'N/A'}
+                      </TableCell>
                       <TableCell>
                         {updatingRole[user.id] ? (
                           <div className="flex items-center gap-2">
@@ -911,7 +1011,7 @@ const Settings = () => {
                             onValueChange={(value) => handleRoleChange(user.id, value as UserRole)}
                             disabled={updatingRole[user.id]}
                           >
-                            <SelectTrigger className="w-[140px] [&>span]:text-left [&>span]:m-0">
+                            <SelectTrigger className="w-[140px] [&>span]:text-left [&>span]:m-0 border-2 border-primary/20 hover:border-primary/50 transition-all">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -931,6 +1031,7 @@ const Settings = () => {
                               ? 'secondary'
                               : 'destructive'
                           }
+                          className="font-semibold shadow-sm"
                         >
                           {user.status || 'pending'}
                         </Badge>
@@ -958,20 +1059,20 @@ const Settings = () => {
                           </div>
                         )}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
                         {formatDate(user.createdAt)}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
                         {user.approvedByName || user.approvedBy || 'N/A'}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-primary/10 hover:text-primary transition-all">
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
+                          <DropdownMenuContent align="end" className="border-2 shadow-xl">
                             <DropdownMenuItem
                               onClick={() => {
                                 setViewingProfileUserId(user.id);
@@ -1009,6 +1110,172 @@ const Settings = () => {
                   })}
                   </TableBody>
                 </Table>
+              </div>
+            ) : (
+              // Card View
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredUsers.map((user, index) => {
+                  const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+                  return (
+                    <Card
+                      key={user.id}
+                      className="group relative overflow-hidden border-border/50 hover:border-primary/30 transition-smooth hover:scale-[1.02] cursor-pointer"
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (
+                          target.closest('button') ||
+                          target.closest('select') ||
+                          target.closest('[role="combobox"]')
+                        ) {
+                          return;
+                        }
+                        setViewingProfileUserId(user.id);
+                        setViewingProfileUserName(userName);
+                      }}
+                      style={{ animationDelay: `${index * 50}ms` }}
+                    >
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center gap-4">
+                            <div className="relative">
+                              <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full blur-lg" />
+                              <Avatar className="h-16 w-16 rounded-full ring-2 ring-primary/20 relative">
+                                <AvatarImage src={userProfilePhotos[user.id] || undefined} alt={userName} />
+                                <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold text-lg">
+                                  {getInitials(userName)}
+                                </AvatarFallback>
+                              </Avatar>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-bold text-lg truncate group-hover:text-primary transition-colors">
+                                {userName}
+                              </h3>
+                              <p className="text-sm text-muted-foreground truncate">
+                                {user.employeeId || 'No ID'}
+                              </p>
+                            </div>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-primary/10 hover:text-primary transition-all">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="border-2 shadow-xl">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setViewingProfileUserId(user.id);
+                                  setViewingProfileUserName(userName);
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Profile
+                              </DropdownMenuItem>
+                              {user.status === 'approved' && (
+                                <DropdownMenuItem
+                                  onClick={() => handleTerminate(user.id)}
+                                  disabled={processing === user.id}
+                                  className="cursor-pointer text-destructive focus:text-destructive"
+                                >
+                                  {processing === user.id ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      Terminating...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Terminate
+                                    </>
+                                  )}
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Job Role</span>
+                            {updatingRole[user.id] ? (
+                              <Skeleton className="h-8 w-[120px]" />
+                            ) : (
+                              <Select
+                                value={user.role || 'itteam'}
+                                onValueChange={(value) => handleRoleChange(user.id, value as UserRole)}
+                                disabled={updatingRole[user.id]}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <SelectTrigger className="w-[120px] h-8 text-sm border-2 border-primary/20 hover:border-primary/50 transition-all">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="admin">Admin</SelectItem>
+                                  <SelectItem value="operationsstaff">Operations Staff</SelectItem>
+                                  <SelectItem value="itteam">IT Team</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                          
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Status</span>
+                            <Badge
+                              variant={
+                                user.status === 'approved'
+                                  ? 'default'
+                                  : user.status === 'pending'
+                                  ? 'secondary'
+                                  : 'destructive'
+                              }
+                              className="font-semibold shadow-sm"
+                            >
+                              {user.status || 'pending'}
+                            </Badge>
+                          </div>
+                          
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Profile</span>
+                            {loadingProfileStatus[user.id] ? (
+                              <Skeleton className="h-5 w-20" />
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                {profileCompletionStatus[user.id] ? (
+                                  <>
+                                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                    <Badge variant="default" className="bg-green-600 hover:bg-green-700 text-xs">
+                                      Completed
+                                    </Badge>
+                                  </>
+                                ) : (
+                                  <>
+                                    <XCircle className="h-4 w-4 text-muted-foreground" />
+                                    <Badge variant="secondary" className="text-xs">
+                                      Incomplete
+                                    </Badge>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="pt-3 border-t border-border/50 space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">Registered</span>
+                              <span className="font-medium">{formatDate(user.createdAt)}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">Approved By</span>
+                              <span className="font-medium truncate ml-2">{user.approvedByName || user.approvedBy || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             );
           })()}
