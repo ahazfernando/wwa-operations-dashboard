@@ -96,7 +96,7 @@ const STATUSES: LeadStatus[] = ['New', 'Contacted', 'Qualified', 'Meeting Schedu
 const KANBAN_STATUSES: LeadStatus[] = ['New', 'Contacted', 'Qualified', 'Meeting Scheduled'];
 const PRIORITIES: LeadPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
 const PLATFORMS: Platform[] = ['Jora', 'Seek', 'Indeed', 'LinkedIn', 'Facebook', 'Instagram', 'Referral', 'Website', 'Direct Contact', 'Other'];
-const JOB_ROLES: JobRole[] = ['Chef / Cook', 'Head Chef', 'Sous Chef', 'Kitchen Hand', 'Waiter / Waitress', 'Barista', 'Manager', 'Other'];
+const JOB_ROLES: JobRole[] = ['Chef / Cook', 'Head Chef', 'Sous Chef', 'Chef De Partie', 'Commis Chef', 'Kitchen Hand', 'Waiter / Waitress', 'Barista', 'Manager', 'Other'];
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
   'New': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',

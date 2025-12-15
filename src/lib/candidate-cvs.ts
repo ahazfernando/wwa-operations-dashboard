@@ -44,7 +44,7 @@ export function convertFirestoreCandidateCV(docData: any, docId: string): Candid
     candidateName: docData.candidateName || '',
     email: docData.email,
     phone: docData.phone,
-    jobRole: docData.jobRole || 'Other',
+    jobRole: Array.isArray(docData.jobRole) ? docData.jobRole : docData.jobRole ? [docData.jobRole] : ['Other'],
     experienceLevel: docData.experienceLevel,
     location: docData.location,
     cvUrl: docData.cvUrl || '',
@@ -183,7 +183,7 @@ export async function updateCandidateCV(
     candidateName: string;
     email: string;
     phone: string;
-    jobRole: JobRole;
+    jobRole: JobRole | JobRole[];
     experienceLevel: ExperienceLevel;
     location: string;
     cvUrl: string;
@@ -256,7 +256,9 @@ export async function getAllCandidateCVs(filters?: {
         q = query(q, where('status', '==', filters.status));
       }
       if (filters?.jobRole) {
-        q = query(q, where('jobRole', '==', filters.jobRole));
+        // Use array-contains to match if jobRole is an array, or == for single value
+        // Note: Firestore array-contains will work for arrays, == will work for single values
+        // We'll filter client-side for better compatibility
       }
       if (filters?.priority) {
         q = query(q, where('priority', '==', filters.priority));
@@ -295,6 +297,14 @@ export async function getAllCandidateCVs(filters?: {
         candidate.location?.toLowerCase().includes(searchLower) ||
         candidate.candidateId.toLowerCase().includes(searchLower)
       );
+    }
+    
+    // Apply job role filter (handle both single and array values)
+    if (filters?.jobRole) {
+      candidates = candidates.filter(candidate => {
+        const candidateRoles = Array.isArray(candidate.jobRole) ? candidate.jobRole : [candidate.jobRole];
+        return candidateRoles.includes(filters.jobRole!);
+      });
     }
     
     return candidates;
@@ -377,8 +387,11 @@ export async function getCandidateCVsAnalytics(): Promise<CandidateAnalytics> {
       // Count by status
       byStatus[candidate.status] = (byStatus[candidate.status] || 0) + 1;
       
-      // Count by job role
-      byJobRole[candidate.jobRole] = (byJobRole[candidate.jobRole] || 0) + 1;
+      // Count by job role (handle both single and array values)
+      const roles = Array.isArray(candidate.jobRole) ? candidate.jobRole : [candidate.jobRole];
+      roles.forEach(role => {
+        byJobRole[role] = (byJobRole[role] || 0) + 1;
+      });
       
       // Count by priority
       byPriority[candidate.priority] = (byPriority[candidate.priority] || 0) + 1;
@@ -439,7 +452,9 @@ export function subscribeToCandidateCVs(
       q = query(q, where('status', '==', filters.status));
     }
     if (filters?.jobRole) {
-      q = query(q, where('jobRole', '==', filters.jobRole));
+      // Use array-contains to match if jobRole is an array, or == for single value
+      // Note: Firestore array-contains will work for arrays, == will work for single values
+      // We'll filter client-side for better compatibility
     }
     if (filters?.priority) {
       q = query(q, where('priority', '==', filters.priority));
@@ -458,6 +473,14 @@ export function subscribeToCandidateCVs(
     let candidates = snapshot.docs.map(doc => 
       convertFirestoreCandidateCV(doc.data(), doc.id)
     );
+    
+    // Apply job role filter client-side if provided
+    if (filters?.jobRole) {
+      candidates = candidates.filter(candidate => {
+        const candidateRoles = Array.isArray(candidate.jobRole) ? candidate.jobRole : [candidate.jobRole];
+        return candidateRoles.includes(filters.jobRole!);
+      });
+    }
     
     // Sort client-side by candidateId in ascending order
     candidates.sort((a, b) => {

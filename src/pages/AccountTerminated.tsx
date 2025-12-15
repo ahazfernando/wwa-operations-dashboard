@@ -54,3 +54,4 @@ const AccountTerminated = () => {
 };
 
 export default AccountTerminated;
+

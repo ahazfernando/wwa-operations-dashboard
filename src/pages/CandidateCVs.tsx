@@ -71,7 +71,7 @@ import { CandidateAnalytics } from '@/types/candidate-cv';
 
 const STATUSES: CandidateStatus[] = ['New', 'Reviewing', 'Shortlisted', 'Interview Scheduled', 'Rejected', 'Hired', 'On Hold'];
 const PRIORITIES: CandidatePriority[] = ['Low', 'Medium', 'High', 'Urgent'];
-const JOB_ROLES: JobRole[] = ['Chef / Cook', 'Head Chef', 'Sous Chef', 'Kitchen Hand', 'Waiter / Waitress', 'Barista', 'Manager', 'Other'];
+const JOB_ROLES: JobRole[] = ['Chef / Cook', 'Head Chef', 'Sous Chef', 'Chef De Partie', 'Commis Chef', 'Kitchen Hand', 'Waiter / Waitress', 'Barista', 'Manager', 'Other'];
 const EXPERIENCE_LEVELS: ExperienceLevel[] = ['Entry Level', 'Junior (1-3 years)', 'Mid Level (3-5 years)', 'Senior (5-10 years)', 'Expert (10+ years)'];
 
 const STATUS_COLORS: Record<CandidateStatus, string> = {
@@ -123,7 +123,7 @@ const CandidateCVs = () => {
     candidateName: '',
     email: '',
     phone: '',
-    jobRole: '' as JobRole | '',
+    jobRole: [] as JobRole[],
     experienceLevel: '' as ExperienceLevel | '',
     location: '',
     notes: '',
@@ -249,7 +249,7 @@ const CandidateCVs = () => {
       candidateName: '',
       email: '',
       phone: '',
-      jobRole: '' as JobRole | '',
+      jobRole: [] as JobRole[],
       experienceLevel: '' as ExperienceLevel | '',
       location: '',
       notes: '',
@@ -313,7 +313,7 @@ const CandidateCVs = () => {
       return;
     }
 
-    if (!formData.jobRole || formData.jobRole === '') {
+    if (!formData.jobRole || formData.jobRole.length === 0) {
       toast({
         title: 'Validation Error',
         description: 'Job role is required',
@@ -347,7 +347,7 @@ const CandidateCVs = () => {
 
       const candidateData: any = {
         candidateName: formData.candidateName.trim(),
-        jobRole: formData.jobRole as JobRole,
+        jobRole: Array.isArray(formData.jobRole) ? formData.jobRole : [formData.jobRole].filter(Boolean),
         cvUrl,
         cvFileName,
         status: formData.status,
@@ -416,7 +416,7 @@ const CandidateCVs = () => {
       candidateName: candidate.candidateName,
       email: candidate.email || '',
       phone: candidate.phone || '',
-      jobRole: candidate.jobRole,
+      jobRole: Array.isArray(candidate.jobRole) ? candidate.jobRole : candidate.jobRole ? [candidate.jobRole] : [],
       experienceLevel: candidate.experienceLevel || ('' as ExperienceLevel | ''),
       location: candidate.location || '',
       notes: candidate.notes || '',
@@ -1009,7 +1009,19 @@ const CandidateCVs = () => {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>{candidate.jobRole}</TableCell>
+                      <TableCell>
+                        {Array.isArray(candidate.jobRole) ? (
+                          <div className="flex flex-wrap gap-1">
+                            {candidate.jobRole.map((role, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs">
+                                {role}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <Badge variant="outline">{candidate.jobRole}</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>{candidate.experienceLevel || 'N/A'}</TableCell>
                       <TableCell>
                         <Badge className={STATUS_COLORS[candidate.status]}>
@@ -1161,6 +1173,31 @@ const CandidateCVs = () => {
                       <Briefcase className="h-4 w-4 text-muted-foreground" />
                       Job Role <span className="text-destructive">*</span>
                     </Label>
+                    {formData.jobRole.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {formData.jobRole.map((role) => (
+                          <Badge
+                            key={role}
+                            variant="secondary"
+                            className="flex items-center gap-1 pr-1"
+                          >
+                            {role}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData({
+                                  ...formData,
+                                  jobRole: formData.jobRole.filter(r => r !== role)
+                                });
+                              }}
+                              className="ml-1 rounded-full hover:bg-destructive/20 p-0.5"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                     <Popover open={jobRoleOpen} onOpenChange={setJobRoleOpen}>
                       <PopoverTrigger asChild>
                         <Button
@@ -1169,7 +1206,11 @@ const CandidateCVs = () => {
                           aria-expanded={jobRoleOpen}
                           className="h-11 w-full justify-between font-normal"
                         >
-                          {formData.jobRole || "Select job role..."}
+                          {formData.jobRole.length > 0 
+                            ? formData.jobRole.length === 1 
+                              ? formData.jobRole[0]
+                              : `${formData.jobRole.length} roles selected`
+                            : "Select job role(s)..."}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -1188,7 +1229,11 @@ const CandidateCVs = () => {
                                   className="w-full justify-start"
                                   onClick={() => {
                                     if (jobRoleSearch.trim()) {
-                                      setFormData({ ...formData, jobRole: jobRoleSearch.trim() as JobRole });
+                                      const customRole = jobRoleSearch.trim() as JobRole;
+                                      const currentRoles = formData.jobRole || [];
+                                      if (!currentRoles.includes(customRole)) {
+                                        setFormData({ ...formData, jobRole: [...currentRoles, customRole] });
+                                      }
                                       setJobRoleOpen(false);
                                       setJobRoleSearch('');
                                     }
@@ -1206,15 +1251,19 @@ const CandidateCVs = () => {
                                   key={role}
                                   value={role}
                                   onSelect={() => {
-                                    setFormData({ ...formData, jobRole: role as JobRole });
-                                    setJobRoleOpen(false);
+                                    const currentRoles = formData.jobRole || [];
+                                    const isSelected = currentRoles.includes(role);
+                                    const newRoles = isSelected
+                                      ? currentRoles.filter(r => r !== role)
+                                      : [...currentRoles, role];
+                                    setFormData({ ...formData, jobRole: newRoles });
                                     setJobRoleSearch('');
                                   }}
                                 >
                                   <Check
                                     className={cn(
                                       "mr-2 h-4 w-4",
-                                      formData.jobRole === role ? "opacity-100" : "opacity-0"
+                                      formData.jobRole?.includes(role) ? "opacity-100" : "opacity-0"
                                     )}
                                   />
                                   {role}
@@ -1225,7 +1274,11 @@ const CandidateCVs = () => {
                                 <CommandItem
                                   value={jobRoleSearch.trim()}
                                   onSelect={() => {
-                                    setFormData({ ...formData, jobRole: jobRoleSearch.trim() as JobRole });
+                                    const customRole = jobRoleSearch.trim() as JobRole;
+                                    const currentRoles = formData.jobRole || [];
+                                    if (!currentRoles.includes(customRole)) {
+                                      setFormData({ ...formData, jobRole: [...currentRoles, customRole] });
+                                    }
                                     setJobRoleOpen(false);
                                     setJobRoleSearch('');
                                   }}
@@ -1524,9 +1577,19 @@ const CandidateCVs = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <Briefcase className="h-4 w-4" />
-                          <span>{selectedCandidate.jobRole}</span>
+                          {Array.isArray(selectedCandidate.jobRole) ? (
+                            <div className="flex flex-wrap gap-1">
+                              {selectedCandidate.jobRole.map((role, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs">
+                                  {role}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span>{selectedCandidate.jobRole}</span>
+                          )}
                         </div>
                         {selectedCandidate.experienceLevel && (
                           <div className="flex items-center gap-1.5">
@@ -1632,7 +1695,17 @@ const CandidateCVs = () => {
                         <CardContent className="space-y-3">
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Job Role</Label>
-                            <p className="text-sm font-semibold">{selectedCandidate.jobRole}</p>
+                            {Array.isArray(selectedCandidate.jobRole) ? (
+                              <div className="flex flex-wrap gap-1">
+                                {selectedCandidate.jobRole.map((role, idx) => (
+                                  <Badge key={idx} variant="outline" className="text-xs">
+                                    {role}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm font-semibold">{selectedCandidate.jobRole}</p>
+                            )}
                           </div>
                           {selectedCandidate.experienceLevel && (
                             <div className="space-y-1">

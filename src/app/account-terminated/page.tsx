@@ -10,3 +10,4 @@ const AccountTerminated = dynamic(() => import("@/pages/AccountTerminated"), {
 export default function AccountTerminatedPage() {
   return <AccountTerminated />;
 }
+

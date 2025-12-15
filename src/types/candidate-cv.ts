@@ -41,7 +41,7 @@ export interface CandidateCV {
   candidateName: string;
   email?: string;
   phone?: string;
-  jobRole: JobRole;
+  jobRole: JobRole | JobRole[];
   experienceLevel?: ExperienceLevel;
   location?: string;
   cvUrl: string; // URL to uploaded CV file
@@ -67,7 +67,7 @@ export interface FirestoreCandidateCV {
   candidateName: string;
   email?: string;
   phone?: string;
-  jobRole: JobRole;
+  jobRole: JobRole | JobRole[];
   experienceLevel?: ExperienceLevel;
   location?: string;
   cvUrl: string;

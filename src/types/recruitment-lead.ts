@@ -26,6 +26,8 @@ export type JobRole =
   | 'Chef / Cook' 
   | 'Head Chef' 
   | 'Sous Chef' 
+  | 'Chef De Partie'
+  | 'Commis Chef'
   | 'Kitchen Hand' 
   | 'Waiter / Waitress' 
   | 'Barista' 
