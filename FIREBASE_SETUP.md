@@ -118,12 +118,12 @@ service cloud.firestore {
       // Users can read their own data (even if pending approval)
       // Admins can read all user data
       allow read: if isAuthenticated() && 
-        (request.auth.uid == userId || isAdmin());
+        (request.auth.uid == userId || resource.data.authUid == request.auth.uid || isAdmin());
       
       // Users can write their own data (for profile updates)
       // Admins can write all user data
       allow write: if isAuthenticated() && 
-        (request.auth.uid == userId || isAdmin());
+        (request.auth.uid == userId || resource.data.authUid == request.auth.uid || isAdmin());
     }
     
     // Tasks collection

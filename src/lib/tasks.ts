@@ -790,9 +790,7 @@ export async function updateTaskOrder(taskId: string, order: number): Promise<vo
     console.error('Error updating task order:', error);
     throw error;
   }
-}
-
-/**
+}/**
  * Reorder tasks within a status column
  * Updates the order of multiple tasks at once
  */
@@ -819,4 +817,3 @@ export async function reorderTasksInStatus(
     throw error;
   }
 }
-
