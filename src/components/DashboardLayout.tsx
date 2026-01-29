@@ -42,6 +42,7 @@ const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Profile', url: '/profile', icon: User, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Clock In/Out', url: '/clock', icon: ClockIcon, roles: ['admin', 'operationsstaff', 'itteam'] },
+  // { title: 'Google API', url: '/google-api', icon: MapPin, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Work From Home Location', url: '/work-from-home', icon: MapPin, roles: ['admin', 'operationsstaff', 'itteam'] },
   { title: 'Employee Ratings', url: '/ratings', icon: Star, roles: ['admin', 'operationsstaff'] },
   // { title: 'Lead Tracking', url: '/leads', icon: Users, roles: ['admin', 'operationsstaff', 'itteam'] },
