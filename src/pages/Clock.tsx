@@ -520,7 +520,7 @@ const Clock = () => {
         // Check if user has an approved work-from-home location
         if (employeeLocation.latitude && employeeLocation.longitude && db) {
           try {
-            const workFromHomeDoc = await getDoc(doc(db, 'workFromHomeLocations', user.id));
+            const workFromHomeDoc = await getDoc(doc(db, 'GoogleAPILocations', user.id));
             if (workFromHomeDoc.exists()) {
               const workFromHomeData = workFromHomeDoc.data();
               if (workFromHomeData.status === 'approved' && 
@@ -655,7 +655,7 @@ const Clock = () => {
       // Check location for clock out if user has approved work-from-home location
       if (db) {
         try {
-          const workFromHomeDoc = await getDoc(doc(db, 'workFromHomeLocations', user.id));
+          const workFromHomeDoc = await getDoc(doc(db, 'GoogleAPILocations', user.id));
           if (workFromHomeDoc.exists()) {
             const workFromHomeData = workFromHomeDoc.data();
             if (workFromHomeData.status === 'approved' && 
@@ -754,7 +754,7 @@ const Clock = () => {
       // Check location for clock out if user has approved work-from-home location
       if (db) {
         try {
-          const workFromHomeDoc = await getDoc(doc(db, 'workFromHomeLocations', user.id));
+          const workFromHomeDoc = await getDoc(doc(db, 'GoogleAPILocations', user.id));
           if (workFromHomeDoc.exists()) {
             const workFromHomeData = workFromHomeDoc.data();
             if (workFromHomeData.status === 'approved' && 
