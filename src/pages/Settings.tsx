@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -23,6 +23,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { APIProvider, Map, AdvancedMarker, InfoWindow } from '@vis.gl/react-google-maps';
+import { PiMapPinFill } from "react-icons/pi";
+
 
 const Settings = () => {
   const { approveUser, rejectUser, terminateUser, reapproveTerminatedUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
@@ -2043,6 +2046,58 @@ const Settings = () => {
         </CardContent>
       </Card>
 
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle>Work From Home Locations Map</CardTitle>
+          <CardDescription>
+            Overview of all approved user locations. Hover over pins to see user names.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {allLocationsAPILoading ? (
+            <div className="h-[500px] flex items-center justify-center">
+              <p>Loading map...</p>
+            </div>
+          ) : allLocationsAPI.length === 0 ? (
+            <div className="h-[500px] flex items-center justify-center text-muted-foreground">
+              No locations to display on map yet
+            </div>
+          ) : (
+            <APIProvider
+              apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'your-api-key-here'}
+            >
+              <div className="h-[500px] w-full rounded-md overflow-hidden border">
+                <Map
+                  defaultCenter={{ lat: 7.8731, lng: 80.7718 }}
+                  defaultZoom={8}
+                  gestureHandling="greedy"
+                  mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID || "DEMO_MAP_ID"}
+                >
+                  {allLocationsAPI
+                    .filter((loc) => loc.status === 'approved')
+                    .map((location) => {
+                      const user = allUsers.find((u) => u.id === location.userId);
+                      const userName =
+                        user?.name ||
+                        `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
+                        location.userName ||
+                        'Unknown User';
+
+                      return (
+                        <MapMarkerWithHover
+                          key={location.id}
+                          location={location}
+                          userName={userName}
+                        />
+                      );
+                    })}
+                </Map>
+              </div>
+            </APIProvider>
+          )}
+        </CardContent>
+      </Card>
+
       <Dialog open={locationAPIDialogOpen} onOpenChange={setLocationAPIDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -2841,5 +2896,78 @@ const Settings = () => {
     </div>
   );
 };
+
+type Location = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  userName?: string;
+  address?: string;
+};
+
+interface MapMarkerWithHoverProps {
+  location: Location;
+  userName: string;
+}
+
+export function MapMarkerWithHover({ location, userName }: MapMarkerWithHoverProps) {
+  const position = useMemo(
+    () => ({ lat: location.latitude, lng: location.longitude }),
+    [location.latitude, location.longitude]
+  );
+
+  const displayName = userName || 'Unknown User';
+  const displayAddress = location.address || 'No address provided';
+
+  return (
+    <>
+      <AdvancedMarker
+        position={position}
+        title={displayName}
+      >
+        <div className="group relative">
+          {/* Pin with hover scale */}
+          <div
+            className="
+            text-blue-600 text-4xl drop-shadow-lg 
+            transition-transform duration-200 
+            group-hover:scale-105 group-hover:drop-shadow-md
+          "
+          >
+            <PiMapPinFill />
+          </div>
+
+          {/* Info "window" as custom HTML – appears on hover */}
+          <div
+            className="
+            absolute bottom-full left-1/2 -translate-x-1/2 mb-3 
+            pointer-events-none opacity-0 group-hover:opacity-100 
+            transition-opacity duration-200 z-50
+          "
+          >
+            <div className="
+            bg-white dark:bg-gray-900 
+            rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700
+            min-w-[220px] overflow-hidden text-sm
+          ">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-2.5 text-white font-semibold">
+                {displayName}
+              </div>
+
+              {/* Body */}
+              <div className="p-3 space-y-2">
+                <div className="flex items-start gap-2 text-gray-700 dark:text-gray-300">
+                  <PiMapPinFill className="text-blue-500 mt-0.5 flex-shrink-0" size={16} />
+                  <span className="leading-tight">{displayAddress}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </AdvancedMarker>
+    </>
+  );
+}
 
 export default Settings;
