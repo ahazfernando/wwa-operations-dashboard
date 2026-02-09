@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -23,6 +23,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { APIProvider, Map, AdvancedMarker, InfoWindow } from '@vis.gl/react-google-maps';
+import { PiMapPinFill } from "react-icons/pi";
+
 
 const Settings = () => {
   const { approveUser, rejectUser, terminateUser, reapproveTerminatedUser, getPendingUsers, getAllUsers, user: currentUser } = useAuth();
@@ -57,11 +60,32 @@ const Settings = () => {
   const [userViewMode, setUserViewMode] = useState<'table' | 'card'>('table');
   const [userProfilePhotos, setUserProfilePhotos] = useState<Record<string, string>>({});
 
+  {/* New states for Google API locations */ }
+  const [locationsAPILoading, setLocationsAPILoading] = useState(true);
+  const [pendingAPILocations, setPendingAPILocations] = useState<any[]>([]);
+  const [processingAPILocation, setProcessingAPILocation] = useState<string | null>(null);
+  const [allLocationsAPILoading, setAllLocationsAPILoading] = useState(true);
+  const [allLocationsAPI, setAllLocationsAPI] = useState<any[]>([]);
+  const [processingLocationAPI, setProcessingLocationAPI] = useState<string | null>(null);
+  const [editingLocationAPI, setEditingLocationAPI] = useState<string | null>(null);
+  const [locationAPIDialogOpen, setLocationAPIDialogOpen] = useState(false);
+  const [selectedUserForLocationAPI, setSelectedUserForLocationAPI] = useState<any>(null);
+  const [locationAPILatitude, setLocationAPILatitude] = useState<string>('');
+  const [locationAPILongitude, setLocationAPILongitude] = useState<string>('');
+  const [locationAPIAddress, setLocationAPIAddress] = useState<string>('');
+  const [allowWorkFromAnywhereAPI, setAllowWorkFromAnywhereAPI] = useState<boolean>(false);
+  const [savingLocationAPI, setSavingLocationAPI] = useState(false);
+  const [deleteLocationAPIId, setDeleteLocationAPIId] = useState<string | null>(null);
+  const [deletingLocationAPI, setDeletingLocationAPI] = useState(false);
+  {/* End of new states */ }
+
   useEffect(() => {
     loadPendingUsers();
     loadAllUsers();
     loadPendingLocations();
     loadAllLocations();
+    loadPendingAPILocations();
+    loadAllLocationsAPI();
   }, []);
 
   const loadPendingUsers = async () => {
@@ -142,6 +166,230 @@ const Settings = () => {
       setProcessing(null);
     }
   };
+
+  {/* New function to load pending Google API locations */ }
+  const loadPendingAPILocations = async () => {
+    if (!db) return;
+    try {
+      setLocationsAPILoading(true);
+      const q = query(collection(db, 'GoogleAPILocations'), where('status', '==', 'pending'));
+      const querySnapshot = await getDocs(q);
+      const locations = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setPendingAPILocations(locations);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load pending locations',
+        variant: 'destructive',
+      });
+    } finally {
+      setLocationsAPILoading(false);
+    }
+  };
+
+  const loadAllLocationsAPI = async () => {
+    if (!db) return;
+    try {
+      setAllLocationsAPILoading(true);
+      const querySnapshot = await getDocs(collection(db, 'GoogleAPILocations'));
+      const locations = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setAllLocationsAPI(locations);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load all locations',
+        variant: 'destructive',
+      });
+    } finally {
+      setAllLocationsAPILoading(false);
+    }
+  };
+
+  const handleApproveLocationAPI = async (locationId: string) => {
+    if (!db || !currentUser) return;
+    try {
+      setProcessingLocationAPI(locationId);
+      await updateDoc(doc(db, 'GoogleAPILocations', locationId), {
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: currentUser.id,
+        approvedByName: currentUser.name || currentUser.email,
+      });
+      toast({
+        title: 'Location Approved',
+        description: 'Work from home location has been approved.',
+      });
+      await loadPendingAPILocations();
+      await loadAllLocationsAPI();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to approve location',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingLocationAPI(null);
+    }
+  };
+
+  const handleRejectLocationAPI = async (locationId: string) => {
+    if (!db) return;
+    try {
+      setProcessingLocationAPI(locationId);
+      await updateDoc(doc(db, 'GoogleAPILocations', locationId), {
+        status: 'rejected',
+        rejectedAt: serverTimestamp(),
+      });
+      toast({
+        title: 'Location Rejected',
+        description: 'Work from home location has been rejected.',
+      });
+      await loadPendingAPILocations();
+      await loadAllLocationsAPI();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to reject location',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingLocationAPI(null);
+    }
+  };
+
+  const handleOpenLocationDialogAPI = (user: any) => {
+    setSelectedUserForLocationAPI(user);
+    // Check if user already has a location
+    const existingLocationAPI = allLocationsAPI.find(loc => loc.userId === user.id);
+    if (existingLocationAPI) {
+      setLocationAPILatitude(existingLocationAPI.latitude?.toString() || '');
+      setLocationAPILongitude(existingLocationAPI.longitude?.toString() || '');
+      setLocationAPIAddress(existingLocationAPI.address || '');
+      setAllowWorkFromAnywhereAPI(existingLocationAPI.allowWorkFromAnywhere || false);
+    } else {
+      setLocationAPILatitude('');
+      setLocationAPILongitude('');
+      setLocationAPIAddress('');
+      setAllowWorkFromAnywhereAPI(false);
+    }
+    setLocationAPIDialogOpen(true);
+  };
+
+  const handleSaveUserLocationAPI = async () => {
+    if (!db || !currentUser || !selectedUserForLocationAPI) return;
+
+    const lat = parseFloat(locationAPILatitude);
+    const lon = parseFloat(locationAPILongitude);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      toast({
+        title: 'Invalid Coordinates',
+        description: 'Please enter valid latitude and longitude values',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (lat < -90 || lat > 90) {
+      toast({
+        title: 'Invalid Latitude',
+        description: 'Latitude must be between -90 and 90',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (lon < -180 || lon > 180) {
+      toast({
+        title: 'Invalid Longitude',
+        description: 'Longitude must be between -180 and 180',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSavingLocationAPI(true);
+    try {
+      const userName = selectedUserForLocationAPI.name ||
+        `${selectedUserForLocationAPI.firstName || ''} ${selectedUserForLocationAPI.lastName || ''}`.trim() ||
+        selectedUserForLocationAPI.email;
+
+      const existingLocation = allLocationsAPI.find(loc => loc.userId === selectedUserForLocationAPI.id);
+
+      const locationData: any = {
+        userId: selectedUserForLocationAPI.id,
+        userName: userName,
+        latitude: lat,
+        longitude: lon,
+        address: locationAPIAddress || undefined,
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+        approvedBy: currentUser.id,
+        approvedByName: currentUser.name || currentUser.email,
+        allowWorkFromAnywhere: allowWorkFromAnywhereAPI,
+        createdAt: existingLocation?.createdAt || serverTimestamp(),
+      };
+
+      await setDoc(doc(db, 'GoogleAPILocations', selectedUserForLocationAPI.id), locationData);
+
+      toast({
+        title: 'Location Saved',
+        description: `Work from home location has been ${existingLocation ? 'updated' : 'set'} for ${userName}.`,
+      });
+
+      setLocationAPIDialogOpen(false);
+      setSelectedUserForLocationAPI(null);
+      setLocationAPILatitude('');
+      setLocationAPILongitude('');
+      setLocationAPIAddress('');
+      setAllowWorkFromAnywhereAPI(false);
+
+      await loadPendingAPILocations();
+      await loadAllLocationsAPI();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save location',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingLocationAPI(false);
+    }
+  };
+
+  const handleDeleteLocationAPI = async () => {
+    if (!db || !deleteLocationAPIId) return;
+
+    setDeletingLocationAPI(true);
+    try {
+      await deleteDoc(doc(db, 'GoogleAPILocations', deleteLocationAPIId));
+
+      toast({
+        title: 'Location Deleted',
+        description: 'Work from home location has been removed.',
+      });
+
+      setDeleteLocationAPIId(null);
+      await loadPendingAPILocations();
+      await loadAllLocationsAPI();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete location',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingLocationAPI(false);
+    }
+  };
+
+  {/* End of new function */ }
 
   const handleReapprove = async (userId: string) => {
     const user = allUsers.find(u => u.id === userId);
@@ -313,12 +561,12 @@ const Settings = () => {
 
     setSavingLocation(true);
     try {
-      const userName = selectedUserForLocation.name || 
-        `${selectedUserForLocation.firstName || ''} ${selectedUserForLocation.lastName || ''}`.trim() || 
+      const userName = selectedUserForLocation.name ||
+        `${selectedUserForLocation.firstName || ''} ${selectedUserForLocation.lastName || ''}`.trim() ||
         selectedUserForLocation.email;
 
       const existingLocation = allLocations.find(loc => loc.userId === selectedUserForLocation.id);
-      
+
       const locationData: any = {
         userId: selectedUserForLocation.id,
         userName: userName,
@@ -346,7 +594,7 @@ const Settings = () => {
       setLocationLongitude('');
       setLocationAddress('');
       setAllowWorkFromAnywhere(false);
-      
+
       await loadPendingLocations();
       await loadAllLocations();
     } catch (error: any) {
@@ -366,7 +614,7 @@ const Settings = () => {
     setDeletingLocation(true);
     try {
       await deleteDoc(doc(db, 'workFromHomeLocations', deleteLocationId));
-      
+
       toast({
         title: 'Location Deleted',
         description: 'Work from home location has been removed.',
@@ -388,29 +636,29 @@ const Settings = () => {
 
   const checkProfileCompletion = async (userId: string): Promise<boolean> => {
     if (!db) return false;
-    
+
     try {
       const profileDoc = await getDoc(doc(db, 'profiles', userId));
       if (!profileDoc.exists()) {
         return false;
       }
-      
+
       const profileData = profileDoc.data();
-      
+
       // Check if essential fields are filled
       const hasEssentialInfo = !!(
         profileData.fullName || profileData.preferredName ||
         profileData.email || profileData.phone
       );
-      
+
       // Check if required documents are uploaded
       const hasRequiredDocs = !!(
-        profileData.idFrontPhoto || 
+        profileData.idFrontPhoto ||
         profileData.idBackPhoto ||
         profileData.selfiePhoto ||
         profileData.passportPhoto
       );
-      
+
       // Profile is considered complete if it has essential info and at least some documents
       return hasEssentialInfo && hasRequiredDocs;
     } catch (error) {
@@ -421,7 +669,7 @@ const Settings = () => {
 
   const loadUserProfilePhotos = async (users: any[]) => {
     if (!db) return;
-    
+
     try {
       const photoPromises = users.map(async (user) => {
         try {
@@ -435,7 +683,7 @@ const Settings = () => {
         }
         return { userId: user.id, photo: null };
       });
-      
+
       const photoResults = await Promise.all(photoPromises);
       const newPhotos: Record<string, string> = {};
       photoResults.forEach(({ userId, photo }) => {
@@ -460,19 +708,19 @@ const Settings = () => {
 
   const checkUserTimeEntryLocations = async (userId: string): Promise<{ hasLocation: boolean; latestLocation?: { lat: number; lng: number } }> => {
     if (!db) return { hasLocation: false };
-    
+
     try {
       // Query time entries for this user
       const timeEntriesQuery = query(
         collection(db, 'timeEntries'),
         where('userId', '==', userId)
       );
-      
+
       const querySnapshot = await getDocs(timeEntriesQuery);
-      
+
       // Find any entry with GPS coordinates (prioritize more recent ones)
       let latestEntry: { lat: number; lng: number; timestamp: Date } | null = null;
-      
+
       for (const doc of querySnapshot.docs) {
         const data = doc.data();
         if (data.clockInLocation?.latitude && data.clockInLocation?.longitude) {
@@ -482,14 +730,14 @@ const Settings = () => {
             lng: data.clockInLocation.longitude,
             timestamp: entryTimestamp,
           };
-          
+
           // Keep the most recent entry
           if (!latestEntry || entryTimestamp > latestEntry.timestamp) {
             latestEntry = location;
           }
         }
       }
-      
+
       if (latestEntry) {
         return {
           hasLocation: true,
@@ -499,7 +747,7 @@ const Settings = () => {
           },
         };
       }
-      
+
       return { hasLocation: false };
     } catch (error) {
       console.error(`Error checking time entry locations for user ${userId}:`, error);
@@ -518,34 +766,34 @@ const Settings = () => {
         return bDate.getTime() - aDate.getTime();
       });
       setAllUsers(sortedUsers);
-      
+
       // Load profile photos for all users
       await loadUserProfilePhotos(sortedUsers);
-      
+
       // Load profile completion status for all users in parallel
       const statusMap: Record<string, boolean> = {};
       const loadingMap: Record<string, boolean> = {};
-      
+
       // Initialize loading states
       sortedUsers.forEach(user => {
         loadingMap[user.id] = true;
       });
       setLoadingProfileStatus(loadingMap);
-      
+
       // Check all profiles in parallel
       const profileChecks = sortedUsers.map(async (user) => {
         const isComplete = await checkProfileCompletion(user.id);
         return { userId: user.id, isComplete };
       });
-      
+
       const results = await Promise.all(profileChecks);
-      
+
       // Update status map
       results.forEach(({ userId, isComplete }) => {
         statusMap[userId] = isComplete;
         loadingMap[userId] = false;
       });
-      
+
       setProfileCompletionStatus(statusMap);
       setLoadingProfileStatus(loadingMap);
 
@@ -554,13 +802,13 @@ const Settings = () => {
         const locationInfo = await checkUserTimeEntryLocations(user.id);
         return { userId: user.id, ...locationInfo };
       });
-      
+
       const locationResults = await Promise.all(locationChecks);
       const locationMap: Record<string, { hasLocation: boolean; latestLocation?: { lat: number; lng: number } }> = {};
       locationResults.forEach(({ userId, hasLocation, latestLocation }) => {
         locationMap[userId] = { hasLocation, latestLocation };
       });
-      
+
       setUsersWithTimeEntryLocations(locationMap);
     } catch (error: any) {
       toast({
@@ -595,7 +843,7 @@ const Settings = () => {
 
     try {
       setUpdatingRole(prev => ({ ...prev, [userId]: true }));
-      
+
       await updateDoc(doc(db, 'users', userId), {
         role: newRole,
         roleUpdatedAt: new Date(),
@@ -656,7 +904,7 @@ const Settings = () => {
 
     try {
       setUploading({ ...uploading, [userId]: true });
-      
+
       // Upload to Firebase Storage
       const storageRef = ref(storage, `contracts/${userId}/${file.name}`);
       await uploadBytes(storageRef, file);
@@ -774,7 +1022,7 @@ const Settings = () => {
 
     try {
       setGrantingPermission(true);
-      
+
       // Update user permissions in Firestore
       const permissions: any = {};
       if (selectedPermission === 'read' || selectedPermission === 'crud') {
@@ -797,7 +1045,7 @@ const Settings = () => {
       // Reset form
       setSelectedUser('');
       setSelectedPermission('none');
-      
+
       // Reload users to reflect changes
       await loadAllUsers();
       await loadItTeamUsers();
@@ -863,11 +1111,10 @@ const Settings = () => {
                   variant={userViewMode === 'table' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setUserViewMode('table')}
-                  className={`h-12 px-4 rounded-none border-0 transition-all duration-300 ${
-                    userViewMode === 'table'
-                      ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 shadow-lg'
-                      : 'hover:bg-primary/10'
-                  }`}
+                  className={`h-12 px-4 rounded-none border-0 transition-all duration-300 ${userViewMode === 'table'
+                    ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 shadow-lg'
+                    : 'hover:bg-primary/10'
+                    }`}
                 >
                   <List className="h-4 w-4 mr-2" />
                   Table
@@ -876,11 +1123,10 @@ const Settings = () => {
                   variant={userViewMode === 'card' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setUserViewMode('card')}
-                  className={`h-12 px-4 rounded-none border-0 transition-all duration-300 ${
-                    userViewMode === 'card'
-                      ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 shadow-lg'
-                      : 'hover:bg-primary/10'
-                  }`}
+                  className={`h-12 px-4 rounded-none border-0 transition-all duration-300 ${userViewMode === 'card'
+                    ? 'bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-500 shadow-lg'
+                    : 'hover:bg-primary/10'
+                    }`}
                 >
                   <LayoutGrid className="h-4 w-4 mr-2" />
                   Cards
@@ -914,26 +1160,26 @@ const Settings = () => {
               if (user.status === 'terminated') {
                 return false;
               }
-              
+
               // Search filter
               if (searchQuery.trim()) {
                 const query = searchQuery.toLowerCase();
                 const userName = (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '').toLowerCase();
                 const userEmail = (user.email || '').toLowerCase();
                 const employeeId = (user.employeeId || '').toLowerCase();
-                
+
                 if (!userName.includes(query) && !userEmail.includes(query) && !employeeId.includes(query)) {
                   return false;
                 }
               }
-              
+
               // Job role filter
               if (selectedJobRole !== 'all') {
                 if (user.role !== selectedJobRole) {
                   return false;
                 }
               }
-              
+
               return true;
             });
 
@@ -966,148 +1212,148 @@ const Settings = () => {
                     {filteredUsers.map((user, index) => {
                       const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
                       return (
-                    <TableRow 
-                      key={user.id}
-                      className="group cursor-pointer hover:bg-gradient-to-r hover:from-primary/5 hover:via-primary/5 hover:to-transparent transition-all duration-300 border-b border-border/50"
-                      onClick={(e) => {
-                        // Don't open profile if clicking on interactive elements
-                        const target = e.target as HTMLElement;
-                        if (
-                          target.closest('button') ||
-                          target.closest('select') ||
-                          target.closest('a') ||
-                          target.closest('input') ||
-                          target.closest('[role="combobox"]')
-                        ) {
-                          return;
-                        }
-                        setViewingProfileUserId(user.id);
-                        setViewingProfileUserName(userName);
-                      }}
-                      style={{ animationDelay: `${index * 50}ms` }}
-                    >
-                      <TableCell className="font-semibold group-hover:text-primary transition-colors">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10 rounded-full ring-2 ring-primary/20">
-                            <AvatarImage src={userProfilePhotos[user.id] || undefined} alt={userName} />
-                            <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold">
-                              {getInitials(userName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span>{userName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground group-hover:text-foreground transition-colors">
-                        {user.employeeId || 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        {updatingRole[user.id] ? (
-                          <div className="flex items-center gap-2">
-                            <Skeleton className="h-8 w-[140px]" />
-                          </div>
-                        ) : (
-                          <Select
-                            value={user.role || 'itteam'}
-                            onValueChange={(value) => handleRoleChange(user.id, value as UserRole)}
-                            disabled={updatingRole[user.id]}
-                          >
-                            <SelectTrigger className="w-[140px] [&>span]:text-left [&>span]:m-0 border-2 border-primary/20 hover:border-primary/50 transition-all">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="admin">Admin</SelectItem>
-                              <SelectItem value="operationsstaff">Operations Staff</SelectItem>
-                              <SelectItem value="itteam">IT Team</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            user.status === 'approved'
-                              ? 'default'
-                              : user.status === 'pending'
-                              ? 'secondary'
-                              : 'destructive'
-                          }
-                          className="font-semibold shadow-sm"
+                        <TableRow
+                          key={user.id}
+                          className="group cursor-pointer hover:bg-gradient-to-r hover:from-primary/5 hover:via-primary/5 hover:to-transparent transition-all duration-300 border-b border-border/50"
+                          onClick={(e) => {
+                            // Don't open profile if clicking on interactive elements
+                            const target = e.target as HTMLElement;
+                            if (
+                              target.closest('button') ||
+                              target.closest('select') ||
+                              target.closest('a') ||
+                              target.closest('input') ||
+                              target.closest('[role="combobox"]')
+                            ) {
+                              return;
+                            }
+                            setViewingProfileUserId(user.id);
+                            setViewingProfileUserName(userName);
+                          }}
+                          style={{ animationDelay: `${index * 50}ms` }}
                         >
-                          {user.status || 'pending'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {loadingProfileStatus[user.id] ? (
-                          <Skeleton className="h-5 w-20" />
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            {profileCompletionStatus[user.id] ? (
-                              <>
-                                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                                  Completed
-                                </Badge>
-                              </>
+                          <TableCell className="font-semibold group-hover:text-primary transition-colors">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10 rounded-full ring-2 ring-primary/20">
+                                <AvatarImage src={userProfilePhotos[user.id] || undefined} alt={userName} />
+                                <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold">
+                                  {getInitials(userName)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span>{userName}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground group-hover:text-foreground transition-colors">
+                            {user.employeeId || 'N/A'}
+                          </TableCell>
+                          <TableCell>
+                            {updatingRole[user.id] ? (
+                              <div className="flex items-center gap-2">
+                                <Skeleton className="h-8 w-[140px]" />
+                              </div>
                             ) : (
-                              <>
-                                <XCircle className="h-4 w-4 text-muted-foreground" />
-                                <Badge variant="secondary">
-                                  Incomplete
-                                </Badge>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-                        {formatDate(user.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-                        {user.approvedByName || user.approvedBy || 'N/A'}
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-primary/10 hover:text-primary transition-all">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="border-2 shadow-xl">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setViewingProfileUserId(user.id);
-                                setViewingProfileUserName(userName);
-                              }}
-                              className="cursor-pointer"
-                            >
-                              <Eye className="h-4 w-4 mr-2" />
-                              View Profile
-                            </DropdownMenuItem>
-                            {user.status === 'approved' && (
-                              <DropdownMenuItem
-                                onClick={() => handleTerminate(user.id)}
-                                disabled={processing === user.id}
-                                className="cursor-pointer text-destructive focus:text-destructive"
+                              <Select
+                                value={user.role || 'itteam'}
+                                onValueChange={(value) => handleRoleChange(user.id, value as UserRole)}
+                                disabled={updatingRole[user.id]}
                               >
-                                {processing === user.id ? (
+                                <SelectTrigger className="w-[140px] [&>span]:text-left [&>span]:m-0 border-2 border-primary/20 hover:border-primary/50 transition-all">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="admin">Admin</SelectItem>
+                                  <SelectItem value="operationsstaff">Operations Staff</SelectItem>
+                                  <SelectItem value="itteam">IT Team</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                user.status === 'approved'
+                                  ? 'default'
+                                  : user.status === 'pending'
+                                    ? 'secondary'
+                                    : 'destructive'
+                              }
+                              className="font-semibold shadow-sm"
+                            >
+                              {user.status || 'pending'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {loadingProfileStatus[user.id] ? (
+                              <Skeleton className="h-5 w-20" />
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                {profileCompletionStatus[user.id] ? (
                                   <>
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Terminating...
+                                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                                      Completed
+                                    </Badge>
                                   </>
                                 ) : (
                                   <>
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    Terminate
+                                    <XCircle className="h-4 w-4 text-muted-foreground" />
+                                    <Badge variant="secondary">
+                                      Incomplete
+                                    </Badge>
                                   </>
                                 )}
-                              </DropdownMenuItem>
+                              </div>
                             )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                            {formatDate(user.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                            {user.approvedByName || user.approvedBy || 'N/A'}
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-primary/10 hover:text-primary transition-all">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="border-2 shadow-xl">
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setViewingProfileUserId(user.id);
+                                    setViewingProfileUserName(userName);
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View Profile
+                                </DropdownMenuItem>
+                                {user.status === 'approved' && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleTerminate(user.id)}
+                                    disabled={processing === user.id}
+                                    className="cursor-pointer text-destructive focus:text-destructive"
+                                  >
+                                    {processing === user.id ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Terminating...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Terminate
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -1195,7 +1441,7 @@ const Settings = () => {
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
-                        
+
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Job Role</span>
@@ -1211,16 +1457,16 @@ const Settings = () => {
                                   <SelectTrigger className="w-[120px] h-8 text-sm border-2 border-primary/20 hover:border-primary/50 transition-all">
                                     <SelectValue />
                                   </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="admin">Admin</SelectItem>
-                                  <SelectItem value="operationsstaff">Operations Staff</SelectItem>
-                                  <SelectItem value="itteam">IT Team</SelectItem>
-                                </SelectContent>
-                              </Select>
+                                  <SelectContent>
+                                    <SelectItem value="admin">Admin</SelectItem>
+                                    <SelectItem value="operationsstaff">Operations Staff</SelectItem>
+                                    <SelectItem value="itteam">IT Team</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
                             )}
                           </div>
-                          
+
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Status</span>
                             <Badge
@@ -1228,15 +1474,15 @@ const Settings = () => {
                                 user.status === 'approved'
                                   ? 'default'
                                   : user.status === 'pending'
-                                  ? 'secondary'
-                                  : 'destructive'
+                                    ? 'secondary'
+                                    : 'destructive'
                               }
                               className="font-semibold shadow-sm"
                             >
                               {user.status || 'pending'}
                             </Badge>
                           </div>
-                          
+
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Profile</span>
                             {loadingProfileStatus[user.id] ? (
@@ -1261,7 +1507,7 @@ const Settings = () => {
                               </div>
                             )}
                           </div>
-                          
+
                           <div className="pt-3 border-t border-border/50 space-y-2">
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-muted-foreground">Registered</span>
@@ -1313,7 +1559,7 @@ const Settings = () => {
             </div>
           ) : (() => {
             const terminatedUsers = allUsers.filter((user) => user.status === 'terminated');
-            
+
             // Apply search filter to terminated users
             const filteredTerminatedUsers = terminatedUsers.filter((user) => {
               if (searchQuery.trim()) {
@@ -1321,7 +1567,7 @@ const Settings = () => {
                 const userName = (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || '').toLowerCase();
                 const userEmail = (user.email || '').toLowerCase();
                 const employeeId = (user.employeeId || '').toLowerCase();
-                
+
                 if (!userName.includes(query) && !userEmail.includes(query) && !employeeId.includes(query)) {
                   return false;
                 }
@@ -1513,6 +1759,685 @@ const Settings = () => {
         </CardContent>
       </Card>
 
+      {/* Google API */}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>All Work From Home Locations</CardTitle>
+          <CardDescription>
+            View and manage all user work from home locations. You can set or update locations for any user.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {allLocationsAPILoading ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-7 gap-4 pb-2 border-b">
+                    {Array.from({ length: 7 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-7 gap-4 py-2">
+                      {Array.from({ length: 7 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">
+                  {allLocationsAPI.length} location{allLocationsAPI.length !== 1 ? 's' : ''} found
+                </p>
+              </div>
+              {allLocationsAPI.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No work from home locations found
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>User</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Location Restriction</TableHead>
+                        <TableHead>Coordinates</TableHead>
+                        <TableHead>Address</TableHead>
+                        <TableHead>Approved By</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {allLocationsAPI.map((location) => {
+                        const user = allUsers.find(u => u.id === location.userId);
+                        const userName = user ? (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email) : (location.userName || 'Unknown User');
+                        return (
+                          <TableRow key={location.id}>
+                            <TableCell className="font-medium">
+                              {userName}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  location.status === 'approved'
+                                    ? 'default'
+                                    : location.status === 'pending'
+                                      ? 'secondary'
+                                      : 'destructive'
+                                }
+                              >
+                                {location.status || 'pending'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {location.status === 'approved' ? (
+                                location.allowWorkFromAnywhere ? (
+                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800">
+                                    Can work from anywhere
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                                    Restricted to 50m radius
+                                  </Badge>
+                                )
+                              ) : (
+                                <span className="text-sm text-muted-foreground">N/A</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-sm">
+                                <div>Lat: {location.latitude?.toFixed(6)}</div>
+                                <div>Lng: {location.longitude?.toFixed(6)}</div>
+                                <a
+                                  href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary hover:underline text-xs flex items-center gap-1 mt-1"
+                                >
+                                  <MapPin className="h-3 w-3" />
+                                  View on Map
+                                </a>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {location.address || (
+                                <span className="text-muted-foreground text-sm">No address provided</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {location.approvedByName || 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {user && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleOpenLocationDialogAPI(user)}
+                                    disabled={editingLocationAPI === location.id}
+                                  >
+                                    <Edit className="h-4 w-4 mr-1" />
+                                    {location.status === 'approved' ? 'Update' : 'Set'}
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setDeleteLocationAPIId(location.id)}
+                                  disabled={deletingLocationAPI}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <div className="pt-4 border-t">
+                <p className="text-sm text-muted-foreground mb-4">
+                  To set a work from home location for a user who doesn't have one, select them from the User Management table above and use the "Set Location" action.
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {allUsers
+                    .filter(user => !allLocationsAPI.find(loc => loc.userId === user.id))
+                    .slice(0, 10)
+                    .map((user) => {
+                      const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+                      return (
+                        <Button
+                          key={user.id}
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleOpenLocationDialogAPI(user)}
+                        >
+                          <MapPin className="h-4 w-4 mr-1" />
+                          Set Location for {userName}
+                        </Button>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending Work From Home Location Approvals</CardTitle>
+          <CardDescription>
+            Review and approve or reject work from home location requests. Once approved, users can only clock in/out within 50 meters of their approved location.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {locationsAPILoading ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-5 gap-4 pb-2 border-b">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-20" />
+                    ))}
+                  </div>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-5 gap-4 py-2">
+                      {Array.from({ length: 5 }).map((_, j) => (
+                        <Skeleton key={j} className="h-8 w-full" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : pendingAPILocations.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No pending work from home location approvals
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Location Name</TableHead>
+                  <TableHead>Coordinates</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingAPILocations.map((location) => (
+                  <TableRow key={location.id}>
+                    <TableCell className="font-medium">
+                      {location.userName || 'Unknown User'}
+                    </TableCell>
+                    <TableCell>
+                      {location.userName}'s Work from Home Location
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div>Lat: {location.latitude?.toFixed(6)}</div>
+                        <div>Lng: {location.longitude?.toFixed(6)}</div>
+                        <a
+                          href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline text-xs flex items-center gap-1 mt-1"
+                        >
+                          <MapPin className="h-3 w-3" />
+                          View on Map
+                        </a>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {location.address || (
+                        <span className="text-muted-foreground text-sm">No address provided</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => handleApproveLocationAPI(location.id)}
+                          disabled={processingAPILocation === location.id}
+                        >
+                          {processingAPILocation === location.id ? (
+                            <Skeleton className="h-4 w-16" />
+                          ) : (
+                            <>
+                              <Check className="h-4 w-4 mr-1" />
+                              Approve
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleRejectLocationAPI(location.id)}
+                          disabled={processingAPILocation === location.id}
+                        >
+                          {processingAPILocation === location.id ? (
+                            <Skeleton className="h-4 w-16" />
+                          ) : (
+                            <>
+                              <X className="h-4 w-4 mr-1" />
+                              Reject
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle>Work From Home Locations Map</CardTitle>
+          <CardDescription>
+            Overview of all approved user locations. Hover over pins to see user names.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {allLocationsAPILoading ? (
+            <div className="h-[500px] flex items-center justify-center">
+              <p>Loading map...</p>
+            </div>
+          ) : allLocationsAPI.length === 0 ? (
+            <div className="h-[500px] flex items-center justify-center text-muted-foreground">
+              No locations to display on map yet
+            </div>
+          ) : (
+            <APIProvider
+              apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'your-api-key-here'}
+            >
+              <div className="h-[500px] w-full rounded-md overflow-hidden border">
+                <Map
+                  defaultCenter={{ lat: 7.8731, lng: 80.7718 }}
+                  defaultZoom={8}
+                  gestureHandling="greedy"
+                  mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID || "DEMO_MAP_ID"}
+                >
+                  {allLocationsAPI
+                    .filter((loc) => loc.status === 'approved')
+                    .map((location) => {
+                      const user = allUsers.find((u) => u.id === location.userId);
+                      const userName =
+                        user?.name ||
+                        `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
+                        location.userName ||
+                        'Unknown User';
+
+                      return (
+                        <MapMarkerWithHover
+                          key={location.id}
+                          location={location}
+                          userName={userName}
+                        />
+                      );
+                    })}
+                </Map>
+              </div>
+            </APIProvider>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={locationAPIDialogOpen} onOpenChange={setLocationAPIDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedUserForLocationAPI ? (
+                <>
+                  {allLocationsAPI.find(loc => loc.userId === selectedUserForLocationAPI.id)
+                    ? 'Update' : 'Set'} Work From Home Location
+                </>
+              ) : 'Set Work From Home Location'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedUserForLocationAPI && (
+                <>
+                  Set or update the work from home location for{' '}
+                  <strong>
+                    {selectedUserForLocationAPI.name ||
+                      `${selectedUserForLocationAPI.firstName || ''} ${selectedUserForLocationAPI.lastName || ''}`.trim() ||
+                      selectedUserForLocationAPI.email}
+                  </strong>
+                  . By default, users can only clock in/out within 50 meters of this location. You can enable "Allow work from any location" to override this restriction.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-4">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="location-latitude">Latitude</Label>
+                <Input
+                  id="location-latitude"
+                  type="number"
+                  step="any"
+                  value={locationAPILatitude}
+                  onChange={(e) => setLocationAPILatitude(e.target.value)}
+                  placeholder="e.g., -37.8136"
+                />
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="location-longitude">Longitude</Label>
+                <Input
+                  id="location-longitude"
+                  type="number"
+                  step="any"
+                  value={locationAPILongitude}
+                  onChange={(e) => setLocationAPILongitude(e.target.value)}
+                  placeholder="e.g., 144.9631"
+                />
+              </div>
+            </div>
+            <div className="flex items-start justify-between p-4 border-2 rounded-lg bg-accent/50 gap-4">
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="allow-anywhere" className="text-base font-semibold cursor-pointer">
+                    Allow work from any location
+                  </Label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  When enabled, this user can clock in/out from anywhere, not just their preferred work from home location. When disabled, they must be within 50 meters of the approved location.
+                </p>
+              </div>
+              <Switch
+                id="allow-anywhere"
+                checked={allowWorkFromAnywhereAPI}
+                onCheckedChange={setAllowWorkFromAnywhereAPI}
+                className="mt-1 flex-shrink-0"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="location-address">Address (Optional)</Label>
+              <Textarea
+                id="location-address"
+                value={locationAPIAddress}
+                onChange={(e) => setLocationAPIAddress(e.target.value)}
+                placeholder="e.g., 123 Main St, Melbourne, VIC 3000"
+                rows={2}
+              />
+            </div>
+            {locationAPILatitude && locationAPILongitude && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Preview Location</Label>
+                  <a
+                    href={`https://www.google.com/maps?q=${locationAPILatitude},${locationAPILongitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline text-sm"
+                  >
+                    Open in Google Maps →
+                  </a>
+                </div>
+                <div className="w-full h-[300px] rounded-lg overflow-hidden border">
+                  <iframe
+                    width="100%"
+                    height="100%"
+                    style={{ border: 0 }}
+                    loading="lazy"
+                    allowFullScreen
+                    referrerPolicy="no-referrer-when-downgrade"
+                    src={`https://maps.google.com/maps?q=${locationAPILatitude},${locationAPILongitude}&hl=en&z=15&output=embed`}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLocationAPIDialogOpen(false);
+                setSelectedUserForLocationAPI(null);
+                setLocationAPILatitude('');
+                setLocationAPILongitude('');
+                setLocationAPIAddress('');
+                setAllowWorkFromAnywhereAPI(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveUserLocationAPI}
+              disabled={savingLocationAPI || !locationAPILatitude || !locationAPILongitude}
+            >
+              {savingLocationAPI ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Location'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteLocationAPIId} onOpenChange={(open) => !open && setDeleteLocationAPIId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Work From Home Location</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const locationToDelete = allLocationsAPI.find(loc => loc.id === deleteLocationAPIId);
+                const user = locationToDelete ? allUsers.find(u => u.id === locationToDelete.userId) : null;
+                const userName = user ? (user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email) : (locationToDelete?.userName || 'Unknown User');
+                return `Are you sure you want to delete the work from home location for ${userName}? This action cannot be undone. The user will need to set a new location if they want to work from home.`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingLocationAPI}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteLocationAPI}
+              disabled={deletingLocationAPI}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingLocationAPI ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Location'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Google API End */}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>IT Team Permissions</CardTitle>
+          <CardDescription>
+            Grant special access to IT team members for Lead Tracking
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingItUsers ? (
+            <div className="space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-32" />
+            </div>
+          ) : itTeamUsers.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No approved IT team members found
+            </p>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="user">Select IT User</Label>
+                <Select
+                  value={selectedUser}
+                  onValueChange={(value) => {
+                    setSelectedUser(value);
+                    // Set the permission dropdown to the user's current permission
+                    const user = itTeamUsers.find(u => u.id === value);
+                    setSelectedPermission(user?.permissions?.leadTracking || 'none');
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose IT team member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {itTeamUsers.map((user) => {
+                      const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+                      const currentPermission = user.permissions?.leadTracking || 'none';
+                      return (
+                        <SelectItem key={user.id} value={user.id}>
+                          {userName} {currentPermission !== 'none' && `(${currentPermission === 'crud' ? 'Full Access' : 'Read Only'})`}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="permission">Permission Level</Label>
+                <Select
+                  value={selectedPermission}
+                  onValueChange={setSelectedPermission}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select permission level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Access</SelectItem>
+                    <SelectItem value="read">Read Only</SelectItem>
+                    <SelectItem value="crud">Editor Access</SelectItem>
+                  </SelectContent>
+                </Select>
+                {selectedUser && (
+                  <p className="text-xs text-muted-foreground">
+                    Current: {(() => {
+                      const user = itTeamUsers.find(u => u.id === selectedUser);
+                      const current = user?.permissions?.leadTracking || 'none';
+                      return current === 'crud' ? 'Full CRUD Access' : current === 'read' ? 'Read Only' : 'No Access';
+                    })()}
+                  </p>
+                )}
+              </div>
+
+              <Button
+                onClick={handleGrantPermission}
+                disabled={!selectedUser || grantingPermission}
+              >
+                {grantingPermission ? (
+                  <Skeleton className="h-4 w-24" />
+                ) : (
+                  'Grant Permission'
+                )}
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Role Management</CardTitle>
+          <CardDescription>View and manage user roles in the system</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 text-sm">
+            <div className="p-3 bg-accent rounded-md">
+              <strong>Admin:</strong> Full access to all modules including settings
+            </div>
+            <div className="p-3 bg-accent rounded-md">
+              <strong>Operations Team:</strong> Full CRUD access to Lead Tracking and employee management
+            </div>
+            <div className="p-3 bg-accent rounded-md">
+              <strong>IT Team:</strong> Denied by default, requires admin approval for specific access
+            </div>
+            <div className="p-3 bg-accent rounded-md">
+              <strong>Employee:</strong> Access to Clock In/Out and personal information only
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Task Management</CardTitle>
+          <CardDescription>View and manage task history</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={() => router.push('/task-history')} variant="outline">
+            <History className="h-4 w-4 mr-2" />
+            View Task History
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>System Configuration</CardTitle>
+          <CardDescription>General system settings</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="company">Company Name</Label>
+            <Input id="company" defaultValue="We Will Australia" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="timezone">Timezone</Label>
+            <Select defaultValue="aest">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="aest">AEST (Sydney)</SelectItem>
+                <SelectItem value="acst">ACST (Adelaide)</SelectItem>
+                <SelectItem value="awst">AWST (Perth)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button>Save Changes</Button>
+        </CardContent>
+      </Card>
+
+      {/* User Profile View Dialog */}
+      {viewingProfileUserId && (
+        <UserProfileViewDialog
+          open={!!viewingProfileUserId}
+          onOpenChange={(open) => {
+            if (!open) {
+              setViewingProfileUserId(null);
+              setViewingProfileUserName('');
+            }
+          }}
+          userId={viewingProfileUserId}
+          userName={viewingProfileUserName}
+        />
+      )}
+
+      {/*
+
       <Card>
         <CardHeader>
           <CardTitle>All Work From Home Locations</CardTitle>
@@ -1580,8 +2505,8 @@ const Settings = () => {
                                   location.status === 'approved'
                                     ? 'default'
                                     : location.status === 'pending'
-                                    ? 'secondary'
-                                    : 'destructive'
+                                      ? 'secondary'
+                                      : 'destructive'
                                 }
                               >
                                 {location.status || 'pending'}
@@ -1798,174 +2723,6 @@ const Settings = () => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>IT Team Permissions</CardTitle>
-          <CardDescription>
-            Grant special access to IT team members for Lead Tracking
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {loadingItUsers ? (
-            <div className="space-y-4">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-32" />
-            </div>
-          ) : itTeamUsers.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No approved IT team members found
-            </p>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="user">Select IT User</Label>
-                <Select 
-                  value={selectedUser} 
-                  onValueChange={(value) => {
-                    setSelectedUser(value);
-                    // Set the permission dropdown to the user's current permission
-                    const user = itTeamUsers.find(u => u.id === value);
-                    setSelectedPermission(user?.permissions?.leadTracking || 'none');
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose IT team member" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {itTeamUsers.map((user) => {
-                      const userName = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
-                      const currentPermission = user.permissions?.leadTracking || 'none';
-                      return (
-                        <SelectItem key={user.id} value={user.id}>
-                          {userName} {currentPermission !== 'none' && `(${currentPermission === 'crud' ? 'Full Access' : 'Read Only'})`}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="permission">Permission Level</Label>
-                <Select 
-                  value={selectedPermission} 
-                  onValueChange={setSelectedPermission}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select permission level" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Access</SelectItem>
-                    <SelectItem value="read">Read Only</SelectItem>
-                    <SelectItem value="crud">Editor Access</SelectItem>
-                  </SelectContent>
-                </Select>
-                {selectedUser && (
-                  <p className="text-xs text-muted-foreground">
-                    Current: {(() => {
-                      const user = itTeamUsers.find(u => u.id === selectedUser);
-                      const current = user?.permissions?.leadTracking || 'none';
-                      return current === 'crud' ? 'Full CRUD Access' : current === 'read' ? 'Read Only' : 'No Access';
-                    })()}
-                  </p>
-                )}
-              </div>
-
-              <Button 
-                onClick={handleGrantPermission} 
-                disabled={!selectedUser || grantingPermission}
-              >
-                {grantingPermission ? (
-                  <Skeleton className="h-4 w-24" />
-                ) : (
-                  'Grant Permission'
-                )}
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Role Management</CardTitle>
-          <CardDescription>View and manage user roles in the system</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3 text-sm">
-            <div className="p-3 bg-accent rounded-md">
-              <strong>Admin:</strong> Full access to all modules including settings
-            </div>
-            <div className="p-3 bg-accent rounded-md">
-              <strong>Operations Team:</strong> Full CRUD access to Lead Tracking and employee management
-            </div>
-            <div className="p-3 bg-accent rounded-md">
-              <strong>IT Team:</strong> Denied by default, requires admin approval for specific access
-            </div>
-            <div className="p-3 bg-accent rounded-md">
-              <strong>Employee:</strong> Access to Clock In/Out and personal information only
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Task Management</CardTitle>
-          <CardDescription>View and manage task history</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button onClick={() => router.push('/task-history')} variant="outline">
-            <History className="h-4 w-4 mr-2" />
-            View Task History
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>System Configuration</CardTitle>
-          <CardDescription>General system settings</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="company">Company Name</Label>
-            <Input id="company" defaultValue="We Will Australia" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="timezone">Timezone</Label>
-            <Select defaultValue="aest">
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="aest">AEST (Sydney)</SelectItem>
-                <SelectItem value="acst">ACST (Adelaide)</SelectItem>
-                <SelectItem value="awst">AWST (Perth)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button>Save Changes</Button>
-        </CardContent>
-      </Card>
-
-      {/* User Profile View Dialog */}
-      {viewingProfileUserId && (
-        <UserProfileViewDialog
-          open={!!viewingProfileUserId}
-          onOpenChange={(open) => {
-            if (!open) {
-              setViewingProfileUserId(null);
-              setViewingProfileUserName('');
-            }
-          }}
-          userId={viewingProfileUserId}
-          userName={viewingProfileUserName}
-        />
-      )}
-
-      {/* Set/Update Location Dialog */}
       <Dialog open={locationDialogOpen} onOpenChange={setLocationDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1982,8 +2739,8 @@ const Settings = () => {
                 <>
                   Set or update the work from home location for{' '}
                   <strong>
-                    {selectedUserForLocation.name || 
-                      `${selectedUserForLocation.firstName || ''} ${selectedUserForLocation.lastName || ''}`.trim() || 
+                    {selectedUserForLocation.name ||
+                      `${selectedUserForLocation.firstName || ''} ${selectedUserForLocation.lastName || ''}`.trim() ||
                       selectedUserForLocation.email}
                   </strong>
                   . By default, users can only clock in/out within 50 meters of this location. You can enable "Allow work from any location" to override this restriction.
@@ -2102,7 +2859,7 @@ const Settings = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Location Confirmation Dialog */}
+      
       <AlertDialog open={!!deleteLocationId} onOpenChange={(open) => !open && setDeleteLocationId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -2135,8 +2892,82 @@ const Settings = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      */}
     </div>
   );
 };
+
+type Location = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  userName?: string;
+  address?: string;
+};
+
+interface MapMarkerWithHoverProps {
+  location: Location;
+  userName: string;
+}
+
+export function MapMarkerWithHover({ location, userName }: MapMarkerWithHoverProps) {
+  const position = useMemo(
+    () => ({ lat: location.latitude, lng: location.longitude }),
+    [location.latitude, location.longitude]
+  );
+
+  const displayName = userName || 'Unknown User';
+  const displayAddress = location.address || 'No address provided';
+
+  return (
+    <>
+      <AdvancedMarker
+        position={position}
+        title={displayName}
+      >
+        <div className="group relative">
+          {/* Pin with hover scale */}
+          <div
+            className="
+            text-blue-600 text-4xl drop-shadow-lg 
+            transition-transform duration-200 
+            group-hover:scale-105 group-hover:drop-shadow-md
+          "
+          >
+            <PiMapPinFill />
+          </div>
+
+          {/* Info "window" as custom HTML – appears on hover */}
+          <div
+            className="
+            absolute bottom-full left-1/2 -translate-x-1/2 mb-3 
+            pointer-events-none opacity-0 group-hover:opacity-100 
+            transition-opacity duration-200 z-50
+          "
+          >
+            <div className="
+            bg-white dark:bg-gray-900 
+            rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700
+            min-w-[220px] overflow-hidden text-sm
+          ">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-2.5 text-white font-semibold">
+                {displayName}
+              </div>
+
+              {/* Body */}
+              <div className="p-3 space-y-2">
+                <div className="flex items-start gap-2 text-gray-700 dark:text-gray-300">
+                  <PiMapPinFill className="text-blue-500 mt-0.5 flex-shrink-0" size={16} />
+                  <span className="leading-tight">{displayAddress}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </AdvancedMarker>
+    </>
+  );
+}
 
 export default Settings;
